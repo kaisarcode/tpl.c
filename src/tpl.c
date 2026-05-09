@@ -1,5 +1,5 @@
 /**
- * tpl.c - Atomic Template Renderer
+ * tpl.c - Template Renderer
  * Summary: Renders template strings with includes, blocks, and scoped data.
  *
  * Author:  KaisarCode

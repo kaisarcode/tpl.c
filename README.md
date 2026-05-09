@@ -1,4 +1,4 @@
-# tpl.c - Atomic Template Renderer
+# tpl.c - Template Renderer
 
 `tpl.c` renders template strings with includes, scoped variables, blocks, and control directives. It reads the template from standard input and writes the rendered output to standard output.
 
