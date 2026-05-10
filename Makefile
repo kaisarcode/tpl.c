@@ -94,6 +94,8 @@ define linux_target
 		-DCMAKE_SYSTEM_NAME=Linux \
 		-DCMAKE_C_COMPILER=$(2) \
 		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out \
+		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
+		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
 		-G Ninja -Wno-dev > /dev/null
 	@cmake --build $(BUILD_DIR)/$(subst /,-,$(1))-linux
 	@cp $(BUILD_DIR)/$(subst /,-,$(1))-linux/out/tpl $(BIN_DIR)/$(1)/linux/tpl
@@ -145,9 +147,12 @@ define windows_target
 		-DCMAKE_SYSTEM_NAME=Windows \
 		-DCMAKE_C_COMPILER=$(2) \
 		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out \
+		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
+		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
 		-G Ninja -Wno-dev > /dev/null
 	@cmake --build $(BUILD_DIR)/$(1)-windows
 	@cp $(BUILD_DIR)/$(1)-windows/out/tpl.exe $(BIN_DIR)/$(1)/windows/tpl.exe
+	@cp $(BUILD_DIR)/$(1)-windows/out/libtpl.dll $(BIN_DIR)/$(1)/windows/libtpl.dll
 	@echo "OK $(1)/windows"
 endef
 
@@ -167,6 +172,8 @@ define android_target
 		-DANDROID_ABI=$(2) \
 		-DANDROID_PLATFORM=android-21 \
 		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out \
+		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
+		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
 		-G Ninja -Wno-dev > /dev/null
 	@cmake --build $(BUILD_DIR)/$(1)-android
 	@cp $(BUILD_DIR)/$(1)-android/out/tpl $(BIN_DIR)/$(1)/android/tpl

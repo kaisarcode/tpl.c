@@ -64,6 +64,18 @@ kc_test_binary_path() {
     printf './bin/%s/%s/tpl\n' "$(kc_test_arch)" "$(kc_test_platform)"
 }
 
+# Returns the static library path for the current architecture and platform.
+# @return Static library path on stdout.
+kc_test_static_library_path() {
+    printf './bin/%s/%s/libtpl.a\n' "$(kc_test_arch)" "$(kc_test_platform)"
+}
+
+# Returns the shared library path for the current architecture and platform.
+# @return Shared library path on stdout.
+kc_test_shared_library_path() {
+    printf './bin/%s/%s/libtpl.so\n' "$(kc_test_arch)" "$(kc_test_platform)"
+}
+
 # Verifies the binary exists and is executable.
 # @return 0 on success, 1 on failure.
 kc_test_check_binary() {
@@ -73,6 +85,22 @@ kc_test_check_binary() {
     fi
 
     return 0
+}
+
+# Verifies the library artifacts exist.
+# @return 0 on success, 1 on failure.
+kc_test_check_libraries() {
+    if [ ! -f "$STATIC_LIB" ]; then
+        kc_test_fail "static library not found: $STATIC_LIB"
+        return 1
+    fi
+
+    if [ ! -f "$SHARED_LIB" ]; then
+        kc_test_fail "shared library not found: $SHARED_LIB"
+        return 1
+    fi
+
+    kc_test_pass "libraries"
 }
 
 # Tests help and version flags.
@@ -274,8 +302,11 @@ kc_test_main() {
     failed=0
 
     BIN=$(kc_test_binary_path)
+    STATIC_LIB=$(kc_test_static_library_path)
+    SHARED_LIB=$(kc_test_shared_library_path)
 
     kc_test_check_binary || exit 1
+    kc_test_check_libraries || failed=$((failed + 1))
 
     kc_test_cli           || failed=$((failed + 1))
     kc_test_escape        || failed=$((failed + 1))

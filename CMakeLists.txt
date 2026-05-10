@@ -3,26 +3,34 @@ project(tpl C)
 
 set(CMAKE_C_STANDARD 11)
 
-
 option(TPL_NATIVE "Enable native hardware optimizations" OFF)
 
 if(NOT MSVC)
     add_compile_options(-O3 -Wall -Wextra -Werror)
+    add_definitions(-D_GNU_SOURCE)
     if(TPL_NATIVE)
         add_compile_options(-march=native)
     endif()
-    add_definitions(-D_GNU_SOURCE)
 else()
     add_compile_options(/O2 /W3 /WX)
 endif()
 
-# Main executable
-add_executable(tpl
-    src/tpl.c
-)
+set(TPL_SOURCES src/libtpl.c)
+set(TPL_HEADERS src/tpl.h)
 
-target_include_directories(tpl PRIVATE src)
+add_library(tpl_shared SHARED ${TPL_SOURCES})
+set_target_properties(tpl_shared PROPERTIES OUTPUT_NAME tpl PREFIX "lib")
+target_include_directories(tpl_shared PRIVATE src)
+
+add_library(tpl_static STATIC ${TPL_SOURCES})
+set_target_properties(tpl_static PROPERTIES OUTPUT_NAME tpl PREFIX "lib" POSITION_INDEPENDENT_CODE ON)
+target_include_directories(tpl_static PRIVATE src)
+
+add_executable(tpl_exe src/tpl.c)
+set_target_properties(tpl_exe PROPERTIES OUTPUT_NAME tpl)
+target_include_directories(tpl_exe PRIVATE src)
+target_link_libraries(tpl_exe tpl_static)
 
 if(UNIX AND NOT ANDROID)
-    target_link_libraries(tpl pthread m)
+    target_link_libraries(tpl_exe pthread m)
 endif()

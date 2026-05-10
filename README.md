@@ -1,6 +1,6 @@
 # tpl.c - Template Renderer
 
-`tpl.c` renders template strings with includes, scoped variables, blocks, and control directives. It reads the template from standard input and writes the rendered output to standard output.
+`tpl.c` is a simple template renderer with includes, scoped variables, blocks, and basic control directives. It provides `libtpl` for C callers and a `tpl` CLI that reads the template from standard input and writes the rendered output to standard output.
 
 ---
 
@@ -56,6 +56,34 @@ Render a file with includes:
 | `{{@foreach item in list}} ... {{@endforeach}}` | Iterate over a comma-separated list or `[a,b,c]` |
 
 Variables are string-based. Lists are passed as CSV or `[a,b,c]`. Truthy values are non-empty strings except `0`, `false`, and `null`. Directives inside HTML comments (`<!-- -->`) are not evaluated.
+
+---
+
+## Public API
+
+```c
+#include "tpl.h"
+
+kc_tpl_t *ctx = kc_tpl_open();
+char *output = NULL;
+
+kc_tpl_set_root(ctx, ".");
+kc_tpl_set_var(ctx, "title", "Home");
+kc_tpl_render_string(ctx, "<h1>{{ title }}</h1>", &output);
+
+free(output);
+kc_tpl_close(ctx);
+```
+
+---
+
+## Lifecycle
+
+- `kc_tpl_open()` - allocates and returns a new renderer context owned by the caller.
+- `kc_tpl_set_root()` - configures include path resolution for the context.
+- `kc_tpl_set_var()` - stores string variables in the context scope.
+- `kc_tpl_render_string()` - renders one template into a caller-owned output buffer.
+- `kc_tpl_close()` - releases the context and all associated variable storage.
 
 ---
 
