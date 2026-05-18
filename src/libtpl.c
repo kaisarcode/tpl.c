@@ -34,7 +34,7 @@ typedef struct {
 } kc_tpl_block_t;
 
 typedef struct kc_tpl_scope {
-    kc_tpl_var_t vars[128];
+    kc_tpl_var_t vars[256];
     int var_n;
     kc_tpl_block_t blocks[64];
     int block_n;

@@ -42,7 +42,7 @@ Recursive descent renderer (`kc_tpl_render_internal`) operating on a mutable cop
 | Variable key length | 63 | `kc_tpl_var_t.key[64]` |
 | Block name length | 63 | `kc_tpl_block_t.name[64]` |
 | Block body size | 8192 | `kc_tpl_block_t.body[8192]` |
-| Vars per scope | 128 | `scope->vars[128]` |
+| Vars per scope | 256 | `scope->vars[256]` |
 | Blocks per scope | 64 | `scope->blocks[64]` |
 | Include full path | 8192 | (hardcoded in `kc_tpl_load`) |
 | Include file content | 8191 | (hardcoded in `kc_tpl_load`) |

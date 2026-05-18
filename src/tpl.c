@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define KC_TPL_VERSION "1.0.0"
+#define KC_TPL_VERSION "1.0.1"
 
 /**
  * Reads all standard input into an owned string.
