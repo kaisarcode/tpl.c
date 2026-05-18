@@ -34,8 +34,9 @@ typedef struct {
 } kc_tpl_block_t;
 
 typedef struct kc_tpl_scope {
-    kc_tpl_var_t vars[256];
+    kc_tpl_var_t *vars;
     int var_n;
+    int var_cap;
     kc_tpl_block_t blocks[64];
     int block_n;
     struct kc_tpl_scope *parent;
@@ -264,8 +265,20 @@ static int kc_tpl_var_set(kc_tpl_scope_t *scope, const char *key, const char *va
     }
 
     if (i == scope->var_n) {
-        if (scope->var_n >= (int)(sizeof(scope->vars) / sizeof(scope->vars[0]))) {
-            return KC_TPL_ERROR;
+        if (scope->var_n >= scope->var_cap) {
+            int new_cap = scope->var_cap == 0 ? 16 : scope->var_cap * 2;
+            kc_tpl_var_t *new_vars = realloc(
+                scope->vars, (size_t)new_cap * sizeof(kc_tpl_var_t)
+            );
+            if (new_vars == NULL) {
+                return KC_TPL_ERROR;
+            }
+            memset(
+                new_vars + scope->var_n, 0,
+                (size_t)(new_cap - scope->var_n) * sizeof(kc_tpl_var_t)
+            );
+            scope->vars = new_vars;
+            scope->var_cap = new_cap;
         }
 
         scope->var_n++;
@@ -299,7 +312,10 @@ static void kc_tpl_scope_clear(kc_tpl_scope_t *scope) {
         scope->vars[i].val = NULL;
     }
 
+    free(scope->vars);
+    scope->vars = NULL;
     scope->var_n = 0;
+    scope->var_cap = 0;
 }
 
 /**

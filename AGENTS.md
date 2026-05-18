@@ -29,7 +29,7 @@ Recursive descent renderer (`kc_tpl_render_internal`) operating on a mutable cop
 | `kc_tpl.scope` | `kc_tpl_scope_t` | Root scope |
 | `kc_tpl_var_t` | `struct { char key[64]; char *val; }` | Scope variable |
 | `kc_tpl_block_t` | `struct { char name[64]; char body[8192]; }` | Named block |
-| `kc_tpl_scope_t` | `struct { vars[128]; var_n; blocks[64]; block_n; parent*; }` | Scope with parent chain |
+| `kc_tpl_scope_t` | `struct { *vars; var_n; var_cap; blocks[64]; block_n; parent*; }` | Scope with parent chain |
 | `kc_tpl_comment_open` | `static const char*` = `{{/*` | Template comment opener |
 | `kc_tpl_comment_close` | `static const char*` = `*/}}` | Template comment closer |
 
@@ -42,7 +42,7 @@ Recursive descent renderer (`kc_tpl_render_internal`) operating on a mutable cop
 | Variable key length | 63 | `kc_tpl_var_t.key[64]` |
 | Block name length | 63 | `kc_tpl_block_t.name[64]` |
 | Block body size | 8192 | `kc_tpl_block_t.body[8192]` |
-| Vars per scope | 256 | `scope->vars[256]` |
+| Vars per scope | Unlimited (dynamic) | `scope->vars` heap array, `realloc`-grown |
 | Blocks per scope | 64 | `scope->blocks[64]` |
 | Include full path | 8192 | (hardcoded in `kc_tpl_load`) |
 | Include file content | 8191 | (hardcoded in `kc_tpl_load`) |
