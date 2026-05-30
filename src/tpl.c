@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define KC_TPL_VERSION "1.0.1"
+#define KC_TPL_VERSION "1.1.0"
 
 /**
  * Reads all standard input into an owned string.
@@ -197,26 +197,37 @@ static int kc_tpl_parse_args(kc_tpl_t *ctx, int argc, char **argv) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
-    kc_tpl_t *ctx;
+    kc_tpl_options_t opts = kc_tpl_options_default();
+    kc_tpl_t *ctx = NULL;
     char *input;
     char *output;
     int parse_rc;
     int status;
 
-    ctx = kc_tpl_open();
-    if (ctx == NULL) {
+    kc_tpl_options_load_env(&opts);
+
+    if (kc_tpl_open(&ctx, &opts) != KC_TPL_OK) {
         fprintf(stderr, "tpl: out of memory\n");
+        kc_tpl_options_free(&opts);
         return 1;
     }
+
+    kc_tpl_listen_signals(ctx);
+#ifndef _WIN32
+    kc_tpl_listen_signal(ctx, 2);
+    kc_tpl_listen_signal(ctx, 15);
+#endif
 
     parse_rc = kc_tpl_parse_args(ctx, argc, argv);
     if (parse_rc == 1) {
         kc_tpl_close(ctx);
+        kc_tpl_options_free(&opts);
         return 0;
     }
 
     if (parse_rc != KC_TPL_OK) {
         kc_tpl_close(ctx);
+        kc_tpl_options_free(&opts);
         return 1;
     }
 
@@ -226,6 +237,7 @@ int main(int argc, char **argv) {
     if (kc_tpl_read_stdin(&input) != KC_TPL_OK) {
         fprintf(stderr, "tpl: failed to read input\n");
         kc_tpl_close(ctx);
+        kc_tpl_options_free(&opts);
         return 1;
     }
 
@@ -240,5 +252,6 @@ int main(int argc, char **argv) {
     free(output);
     free(input);
     kc_tpl_close(ctx);
+    kc_tpl_options_free(&opts);
     return status;
 }

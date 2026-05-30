@@ -19,18 +19,85 @@ typedef struct kc_tpl kc_tpl_t;
 #define KC_TPL_OK      0
 #define KC_TPL_ERROR  -1
 
-/**
- * Allocates a new renderer context.
- * @return Context pointer, or NULL on allocation failure.
- */
-kc_tpl_t *kc_tpl_open(void);
+typedef struct {
+    char *root;
+} kc_tpl_options_t;
+
+typedef void (*kc_tpl_signal_callback_t)(kc_tpl_t *ctx);
 
 /**
- * Releases a renderer context and its owned data.
- * @param ctx Context pointer.
+ * Create an options struct initialized with default values.
+ * @return Default-initialized options.
+ */
+kc_tpl_options_t kc_tpl_options_default(void);
+
+/**
+ * Load configuration from environment variables.
+ * @param opts Options to update.
  * @return None.
  */
-void kc_tpl_close(kc_tpl_t *ctx);
+void kc_tpl_options_load_env(kc_tpl_options_t *opts);
+
+/**
+ * Free dynamically allocated resources within an options struct.
+ * @param opts Options to clean up.
+ * @return None.
+ */
+void kc_tpl_options_free(kc_tpl_options_t *opts);
+
+/**
+ * Register a handler for a library-level signal number.
+ * @param ctx Context pointer.
+ * @param sig Application-defined signal number.
+ * @param cb Callback to invoke.
+ * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
+ */
+int kc_tpl_on_signal(kc_tpl_t *ctx, int sig, kc_tpl_signal_callback_t cb);
+
+/**
+ * Raise a library-level signal.
+ * @param ctx Context pointer.
+ * @param sig Signal number to raise.
+ * @return KC_TPL_OK if handled, or KC_TPL_ERROR if no handler.
+ */
+int kc_tpl_raise_signal(kc_tpl_t *ctx, int sig);
+
+/**
+ * Set the internal signal-listener context.
+ * @param ctx Context pointer.
+ * @return KC_TPL_OK on success, or KC_TPL_ERROR if ctx is NULL.
+ */
+int kc_tpl_listen_signals(kc_tpl_t *ctx);
+
+/**
+ * Wire an OS signal to the library signal listener.
+ * @param ctx Context pointer.
+ * @param sig_id OS signal number.
+ * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
+ */
+int kc_tpl_listen_signal(kc_tpl_t *ctx, int sig_id);
+
+/**
+ * Generic signal-listener compatible with signal() / sigaction().
+ * @param sig OS signal number.
+ * @return None.
+ */
+void kc_tpl_signal_listener(int sig);
+
+/**
+ * Initialize a renderer context with provided options.
+ * @param out Pointer to receive the context pointer.
+ * @param opts Options.
+ * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
+ */
+int kc_tpl_open(kc_tpl_t **out, const kc_tpl_options_t *opts);
+
+/**
+ * Release a renderer context and its owned data.
+ * @param ctx Context pointer.
+ * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
+ */
+int kc_tpl_close(kc_tpl_t *ctx);
 
 /**
  * Sets the include root used by include directives.
