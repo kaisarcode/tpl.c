@@ -128,7 +128,7 @@ static void kc_print_help(const char *name) {
     printf("Options:\n");
     printf("    --root <dir>        Base directory for includes (default: cwd)\n");
     printf("    --var <key=value>   Inject a template variable (repeatable)\n");
-    printf("    -h, --help          Show this help message\n");
+    printf("    -h, --help          Show this help\n");
     printf("    -v, --version       Show version\n");
 }
 
