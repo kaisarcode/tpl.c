@@ -11,8 +11,8 @@
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE 700
 #include <unistd.h>
-#include <signal.h>
 #endif
+#include <signal.h>
 
 #include "tpl.h"
 
@@ -1431,7 +1431,8 @@ int kc_tpl_listen_signal(kc_tpl_t *ctx, int sig_id) {
  * @return None.
  */
 void kc_tpl_signal_listener(int sig) {
-    if (g_signal_ctx) {
-        kc_tpl_raise_signal(g_signal_ctx, sig);
-    }
+    if (g_signal_ctx && kc_tpl_raise_signal(g_signal_ctx, sig) == 0)
+        return;
+    signal(sig, SIG_DFL);
+    raise(sig);
 }

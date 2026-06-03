@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## v1.1.1
+
+- Fixed `tpl_signal_listener` to restore default signal behavior (SIG_DFL)
+  when no `on_signal` handler is registered. Moved `<signal.h>` include to
+  be unconditional for MinGW compatibility.
+
 ## v1.1.0
 
 - Added data-driven configuration lifecycle through `kc_tpl_options_t`.
