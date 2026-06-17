@@ -5,6 +5,10 @@ set(CMAKE_C_STANDARD 11)
 
 option(TPL_NATIVE "Enable native hardware optimizations" OFF)
 
+if(NOT DEFINED TPL_BUILD_VERSION)
+    set(TPL_BUILD_VERSION 0)
+endif()
+
 if(NOT MSVC)
     add_compile_options(-O3 -Wall -Wextra -Werror)
     add_definitions(-D_GNU_SOURCE)
@@ -17,6 +21,10 @@ endif()
 
 set(TPL_SOURCES src/libtpl.c)
 set(TPL_HEADERS src/tpl.h)
+
+set_source_files_properties(src/libtpl.c PROPERTIES
+    COMPILE_DEFINITIONS KC_TPL_BUILD_VERSION=${TPL_BUILD_VERSION}
+)
 
 add_library(tpl_shared SHARED ${TPL_SOURCES})
 set_target_properties(tpl_shared PROPERTIES OUTPUT_NAME tpl PREFIX "lib")

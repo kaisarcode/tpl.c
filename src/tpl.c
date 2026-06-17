@@ -18,8 +18,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define KC_TPL_VERSION "1.1.1"
-
 /**
  * Reads all standard input into an owned string.
  * @param out_text Destination pointer for owned text.
@@ -137,7 +135,7 @@ static void kc_print_help(const char *name) {
  * @return None.
  */
 static void kc_print_version(void) {
-    printf("tpl %s\n", KC_TPL_VERSION);
+    printf("tpl build %llu\n", (unsigned long long)kc_tpl_version());
 }
 
 /**

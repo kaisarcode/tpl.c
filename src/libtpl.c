@@ -84,6 +84,18 @@ struct kc_tpl {
 static const char *kc_tpl_comment_open = "{{/" "*";
 static const char *kc_tpl_comment_close = "*" "/}}";
 
+#ifndef KC_TPL_BUILD_VERSION
+#define KC_TPL_BUILD_VERSION 0
+#endif
+
+/**
+ * Returns the build version generated at compile time.
+ * @return Unix timestamp for the current build.
+ */
+uint64_t kc_tpl_version(void) {
+    return (uint64_t)KC_TPL_BUILD_VERSION;
+}
+
 /**
  * Stores the latest context error.
  * @param ctx Context pointer.
