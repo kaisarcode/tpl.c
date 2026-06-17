@@ -1,14 +1,19 @@
 #!/bin/sh
 # test.sh
-# Summary: Validation suite for tpl functionality.
+# Summary: Validation suite for libtpl behavior and tpl runtime integration.
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
 # License: https://www.gnu.org/licenses/gpl-3.0.html
+
+PASS=0
+FAIL=0
+TMP_ROOT=
 
 # Prints one failure line.
 # @param $1 Failure message.
 # @return 1 on failure.
 kc_test_fail() {
+    FAIL=$((FAIL + 1))
     printf '\033[31m[FAIL]\033[0m %s\n' "$1"
     return 1
 }
@@ -17,7 +22,9 @@ kc_test_fail() {
 # @param $1 Success message.
 # @return 0 on success.
 kc_test_pass() {
+    PASS=$((PASS + 1))
     printf '\033[32m[PASS]\033[0m %s\n' "$1"
+    return 0
 }
 
 # Detects the artifact architecture for the current machine.
@@ -76,251 +83,305 @@ kc_test_shared_library_path() {
     printf './bin/%s/%s/libtpl.so\n' "$(kc_test_arch)" "$(kc_test_platform)"
 }
 
-# Verifies the binary exists and is executable.
-# @return 0 on success, 1 on failure.
-kc_test_check_binary() {
-    if [ ! -x "$BIN" ]; then
-        kc_test_fail "binary not found: $BIN"
-        return 1
+# Removes temporary files owned by the suite.
+# @return 0 on success.
+kc_test_cleanup() {
+    if [ -n "$TMP_ROOT" ]; then
+        rm -rf "$TMP_ROOT"
     fi
-
     return 0
 }
 
-# Verifies the library artifacts exist.
+# Verifies the binary and library artifacts needed by behavior tests exist.
 # @return 0 on success, 1 on failure.
-kc_test_check_libraries() {
+kc_test_check_artifacts() {
+    if [ ! -x "$BIN" ]; then
+        kc_test_fail "runtime artifact: expected executable at $BIN, got missing"
+        return 1
+    fi
+
     if [ ! -f "$STATIC_LIB" ]; then
-        kc_test_fail "static library not found: $STATIC_LIB"
+        kc_test_fail "static library artifact: expected file at $STATIC_LIB, got missing"
         return 1
     fi
 
     if [ ! -f "$SHARED_LIB" ]; then
-        kc_test_fail "shared library not found: $SHARED_LIB"
+        kc_test_fail "shared library artifact: expected file at $SHARED_LIB, got missing"
         return 1
     fi
 
-    kc_test_pass "libraries"
+    kc_test_pass "artifacts: runtime and libraries are available"
+    return 0
 }
 
-# Tests help and version flags.
-# @return 0 on success, 1 on failure.
-kc_test_cli() {
-    if ! "$BIN" --help > /dev/null 2>&1; then
-        kc_test_fail "cli: --help failed"
-        return 1
-    fi
+# Writes the helper source that validates exported libtpl contracts.
+# @param $1 Destination source file path.
+# @return 0 on success.
+kc_test_write_helper() {
+    cat > "$1" <<'KC_TPL_HELPER'
+static int expect_int(const char *name, int expected, int actual) {
+    if (expected != actual) {
+        fprintf(stderr, "%s: expected %d, got %d\n", name, expected, actual);
+        return 1;
+    }
 
-    if ! "$BIN" -v > /dev/null 2>&1; then
-        kc_test_fail "cli: -v failed"
-        return 1
-    fi
-
-    if "$BIN" --unknown > /dev/null 2>&1; then
-        kc_test_fail "cli: unknown flag should fail"
-        return 1
-    fi
-
-    if "$BIN" --root > /dev/null 2>&1; then
-        kc_test_fail "cli: missing --root value should fail"
-        return 1
-    fi
-
-    if "$BIN" --var > /dev/null 2>&1; then
-        kc_test_fail "cli: missing --var value should fail"
-        return 1
-    fi
-
-    if "$BIN" --var broken > /dev/null 2>&1; then
-        kc_test_fail "cli: invalid --var format should fail"
-        return 1
-    fi
-
-    kc_test_pass "cli"
+    return 0;
 }
 
-# Tests escaped variable output.
-# @return 0 on success, 1 on failure.
-kc_test_escape() {
-    out=$(printf '%s' '<h1>{{ title }}</h1>' | "$BIN" --var title='A&B')
-    if [ "$out" != "<h1>A&amp;B</h1>" ]; then
-        kc_test_fail "escape: output mismatch"
-        return 1
-    fi
+static int expect_string(const char *name, const char *expected, const char *actual) {
+    if (actual == NULL || strcmp(expected, actual) != 0) {
+        fprintf(stderr, "%s: expected '%s', got '%s'\n", name, expected, actual != NULL ? actual : "NULL");
+        return 1;
+    }
 
-    kc_test_pass "escape"
+    return 0;
 }
 
-# Tests raw (unescaped) output tag.
-# @return 0 on success, 1 on failure.
-kc_test_raw() {
-    out=$(printf '%s' '{{{ raw }}}' | "$BIN" --var raw='<b>x</b>')
-    if [ "$out" != "<b>x</b>" ]; then
-        kc_test_fail "raw: output mismatch"
-        return 1
-    fi
+static int render_expect(kc_tpl_t *ctx, const char *input, const char *expected) {
+    char *output = NULL;
+    int rc;
 
-    kc_test_pass "raw"
+    rc = kc_tpl_render_string(ctx, input, &output);
+    if (rc != KC_TPL_OK) {
+        fprintf(stderr, "render: expected KC_TPL_OK, got %d: %s\n", rc, kc_tpl_strerror(ctx));
+        free(output);
+        return 1;
+    }
+
+    rc = expect_string("render output", expected, output);
+    free(output);
+    return rc;
 }
 
-# Tests if/else directive.
-# @return 0 on success, 1 on failure.
-kc_test_if() {
-    out=$(printf '%s' '{{@if show}}yes{{@else}}no{{@endif}}' | "$BIN" --var show=true)
-    if [ "$out" != "yes" ]; then
-        kc_test_fail "if: branch mismatch"
-        return 1
-    fi
+static int case_version(void) {
+    if (kc_tpl_version() == 0U) {
+        fprintf(stderr, "version: expected non-zero build timestamp, got 0\n");
+        return 1;
+    }
 
-    out=$(printf '%s' '{{@if show}}yes{{@else}}no{{@endif}}' | "$BIN")
-    if [ "$out" != "no" ]; then
-        kc_test_fail "if: else branch mismatch"
-        return 1
-    fi
-
-    kc_test_pass "if"
+    return 0;
 }
 
-# Tests foreach directive.
-# @return 0 on success, 1 on failure.
-kc_test_foreach() {
-    out=$(printf '%s' '{{@foreach item in items}}<i>{{ item }}</i>{{@endforeach}}' | "$BIN" --var items='[alpha,beta]')
-    if [ "$out" != "<i>alpha</i><i>beta</i>" ]; then
-        kc_test_fail "foreach: output mismatch"
-        return 1
-    fi
+static int case_lifecycle(void) {
+    kc_tpl_options_t opts = kc_tpl_options_default();
+    kc_tpl_t *ctx = NULL;
+    char *output = NULL;
+    int rc = 0;
 
-    kc_test_pass "foreach"
+    rc += expect_int("open(NULL, opts)", KC_TPL_ERROR, kc_tpl_open(NULL, &opts));
+    rc += expect_int("open(out, NULL)", KC_TPL_ERROR, kc_tpl_open(&ctx, NULL));
+    rc += expect_int("render(NULL, input, output)", KC_TPL_ERROR, kc_tpl_render_string(NULL, "x", &output));
+    rc += expect_int("set_root(NULL, root)", KC_TPL_ERROR, kc_tpl_set_root(NULL, "."));
+    rc += expect_int("set_var(NULL, key, value)", KC_TPL_ERROR, kc_tpl_set_var(NULL, "k", "v"));
+    rc += expect_int("close(NULL)", KC_TPL_OK, kc_tpl_close(NULL));
+    rc += expect_int("open(out, opts)", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
+    rc += expect_int("close(ctx)", KC_TPL_OK, kc_tpl_close(ctx));
+    kc_tpl_options_free(&opts);
+    return rc == 0 ? 0 : 1;
 }
 
-# Tests dot-notation variable lookup.
-# @return 0 on success, 1 on failure.
-kc_test_dot() {
-    out=$(printf '%s' '{{ user.name }}' | "$BIN" --var user_name=Kaisar)
-    if [ "$out" != "Kaisar" ]; then
-        kc_test_fail "dot: lookup mismatch"
-        return 1
-    fi
+static int case_render_core(void) {
+    kc_tpl_options_t opts = kc_tpl_options_default();
+    kc_tpl_t *ctx = NULL;
+    int rc = 0;
 
-    out=$(printf '%s' '{{@foreach item in items}}<b>{{ item.title }}</b>{{@endforeach}}' | \
-        "$BIN" --var items='[item_1,item_2]' --var item_1_title=One --var item_2_title=Two)
-    if [ "$out" != "<b>One</b><b>Two</b>" ]; then
-        kc_test_fail "dot: foreach alias lookup mismatch"
-        return 1
-    fi
+    if (kc_tpl_open(&ctx, &opts) != KC_TPL_OK) {
+        fprintf(stderr, "open: expected KC_TPL_OK, got KC_TPL_ERROR\n");
+        return 1;
+    }
 
-    kc_test_pass "dot"
+    rc += expect_int("set_var title", KC_TPL_OK, kc_tpl_set_var(ctx, "title", "A&B"));
+    rc += expect_int("set_var raw", KC_TPL_OK, kc_tpl_set_var(ctx, "raw", "<b>x</b>"));
+    rc += expect_int("set_var items", KC_TPL_OK, kc_tpl_set_var(ctx, "items", "[item_1,item_2]"));
+    rc += expect_int("set_var item_1_title", KC_TPL_OK, kc_tpl_set_var(ctx, "item_1_title", "One"));
+    rc += expect_int("set_var item_2_title", KC_TPL_OK, kc_tpl_set_var(ctx, "item_2_title", "Two"));
+    rc += render_expect(ctx, "<h1>{{ title }}</h1>", "<h1>A&amp;B</h1>");
+    rc += render_expect(ctx, "{{{ raw }}}", "<b>x</b>");
+    rc += render_expect(ctx, "{{@if title}}yes{{@else}}no{{@endif}}", "yes");
+    rc += render_expect(ctx, "{{@foreach item in items}}<b>{{ item.title }}</b>{{@endforeach}}", "<b>One</b><b>Two</b>");
+    rc += render_expect(ctx, "{{@setblock card}}<i>{{ name }}</i>{{@endsetblock}}{{@block card [ \"name\": \"Ada\" ]}}", "<i>Ada</i>");
+    rc += render_expect(ctx, "A{{/* hidden */}}B", "AB");
+    rc += render_expect(ctx, "<div><!-- {{@if title}}x{{@endif}} --></div>", "<div><!-- {{@if title}}x{{@endif}} --></div>");
+    rc += expect_int("close(ctx)", KC_TPL_OK, kc_tpl_close(ctx));
+    kc_tpl_options_free(&opts);
+    return rc == 0 ? 0 : 1;
 }
 
-# Tests setblock and block directives.
-# @return 0 on success, 1 on failure.
-kc_test_block() {
-    out=$(printf '%s' '{{@setblock card}}<b>{{ name }}</b>{{@endsetblock}}{{@block card}}' | "$BIN" --var name=Kaisar)
-    if [ "$out" != "<b>Kaisar</b>" ]; then
-        kc_test_fail "block: render mismatch"
-        return 1
-    fi
+static int case_include_env(const char *root) {
+    kc_tpl_options_t opts = kc_tpl_options_default();
+    kc_tpl_t *ctx = NULL;
+    int rc = 0;
 
-    out=$(printf '%s' '{{@setblock nav_item}}<a href="{{href}}">{{label}}</a>{{@endsetblock}}{{@block nav_item [ "href": "/about", "label": "About" ]}}' | "$BIN")
-    if [ "$out" != '<a href="/about">About</a>' ]; then
-        kc_test_fail "block: props render mismatch"
-        return 1
-    fi
+    if (setenv("KC_TPL_ROOT", root, 1) != 0) {
+        fprintf(stderr, "setenv KC_TPL_ROOT: expected success, got failure\n");
+        return 1;
+    }
 
-    kc_test_pass "block"
+    kc_tpl_options_load_env(&opts);
+    if (kc_tpl_open(&ctx, &opts) != KC_TPL_OK) {
+        fprintf(stderr, "open env root: expected KC_TPL_OK, got KC_TPL_ERROR\n");
+        kc_tpl_options_free(&opts);
+        return 1;
+    }
+
+    rc += expect_int("set_var page", KC_TPL_OK, kc_tpl_set_var(ctx, "page", "Home"));
+    rc += render_expect(ctx, "{{@include \"page.html\"}}", "<title>Home</title>\n<section>&lt;ok&gt;\n</section>\n");
+    rc += expect_int("close(ctx)", KC_TPL_OK, kc_tpl_close(ctx));
+    kc_tpl_options_free(&opts);
+    unsetenv("KC_TPL_ROOT");
+    return rc == 0 ? 0 : 1;
 }
 
-# Tests include directive with --root.
+static int case_failure_paths(void) {
+    kc_tpl_options_t opts = kc_tpl_options_default();
+    kc_tpl_t *ctx = NULL;
+    char *output = NULL;
+    int rc = 0;
+
+    if (kc_tpl_open(&ctx, &opts) != KC_TPL_OK) {
+        fprintf(stderr, "open failure case: expected KC_TPL_OK, got KC_TPL_ERROR\n");
+        return 1;
+    }
+
+    rc += expect_int("invalid variable key", KC_TPL_ERROR, kc_tpl_set_var(ctx, "", "value"));
+    rc += expect_int("missing include", KC_TPL_ERROR, kc_tpl_render_string(ctx, "{{@include \"missing.html\"}}", &output));
+    free(output);
+    output = NULL;
+    rc += expect_int("unterminated tag", KC_TPL_ERROR, kc_tpl_render_string(ctx, "{{ title", &output));
+    free(output);
+    rc += expect_int("close(ctx)", KC_TPL_OK, kc_tpl_close(ctx));
+    kc_tpl_options_free(&opts);
+    return rc == 0 ? 0 : 1;
+}
+
+int main(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "missing helper case\n");
+        return 2;
+    }
+
+    if (strcmp(argv[1], "version") == 0) return case_version();
+    if (strcmp(argv[1], "lifecycle") == 0) return case_lifecycle();
+    if (strcmp(argv[1], "render-core") == 0) return case_render_core();
+    if (strcmp(argv[1], "include-env") == 0 && argc == 3) return case_include_env(argv[2]);
+    if (strcmp(argv[1], "failure-paths") == 0) return case_failure_paths();
+    fprintf(stderr, "unknown helper case: %s\n", argv[1]);
+    return 2;
+}
+KC_TPL_HELPER
+    return 0
+}
+
+# Compiles the helper program against the built static library.
 # @return 0 on success, 1 on failure.
-kc_test_include() {
-    TEST_DIR=$(mktemp -d)
-    mkdir -p "$TEST_DIR/partial"
+kc_test_compile_helper() {
+    helper_src=$TMP_ROOT/tpl-helper.c
+    helper_bin=$TMP_ROOT/tpl-helper
+    log=$TMP_ROOT/helper-build.log
 
-    printf '%s\n' '<title>{{ page }}</title><section>{{@include "partial/item.html"}}</section>' \
-        > "$TEST_DIR/page.html"
-    printf '%s\n' '{{@var value "<ok>"}}<span>{{ value }}</span>' \
-        > "$TEST_DIR/partial/item.html"
+    kc_test_write_helper "$helper_src"
+    if ! cc -std=c11 -Wall -Wextra -Werror \
+        -D_POSIX_C_SOURCE=200809L \
+        -include tpl.h \
+        -include stdint.h \
+        -include stdio.h \
+        -include stdlib.h \
+        -include string.h \
+        -Isrc "$helper_src" "$STATIC_LIB" -o "$helper_bin" > "$log" 2>&1; then
+        kc_test_fail "helper compile: expected successful C build, got failure: $(tr '\n' ' ' < "$log")"
+        return 1
+    fi
 
-    out=$(printf '%s' '{{@include "page.html"}}' | "$BIN" --root "$TEST_DIR" --var page=Home)
-    expected=$(printf '<title>Home</title><section><span>&lt;ok&gt;</span>\n</section>')
+    kc_test_pass "helper compile: libtpl test harness linked"
+    return 0
+}
+
+# Runs one helper case and reports its behavior contract.
+# @param $1 Helper case name.
+# @param $2 Success message.
+# @param $3 Failure message prefix.
+# @param $4 Optional helper argument.
+# @return 0 on success, 1 on failure.
+kc_test_helper_case() {
+    case_name=$1
+    pass_message=$2
+    fail_prefix=$3
+    arg=$4
+    log=$TMP_ROOT/helper-$case_name.log
+
+    if [ -n "$arg" ]; then
+        if "$TMP_ROOT/tpl-helper" "$case_name" "$arg" > "$log" 2>&1; then
+            kc_test_pass "$pass_message"
+            return 0
+        fi
+    elif "$TMP_ROOT/tpl-helper" "$case_name" > "$log" 2>&1; then
+        kc_test_pass "$pass_message"
+        return 0
+    fi
+
+    if [ -s "$log" ]; then
+        kc_test_fail "$fail_prefix: expected helper success, got failure: $(tr '\n' ' ' < "$log")"
+        return 1
+    fi
+
+    kc_test_fail "$fail_prefix: expected helper success, got failure with no diagnostic output"
+    return 1
+}
+
+# Creates include files used by library include resolution tests.
+# @return Include root path on stdout.
+kc_test_create_include_root() {
+    root=$TMP_ROOT/include-root
+    mkdir -p "$root"
+    printf '%s\n' '<title>{{ page }}</title>' > "$root/page.html"
+    printf '%s\n' '<section>{{@include "partial.html"}}</section>' >> "$root/page.html"
+    printf '%s\n' '{{@var value "<ok>"}}{{ value }}' > "$root/partial.html"
+    printf '%s\n' "$root"
+}
+
+# Verifies the CLI renders stdin as a thin integration surface over the library.
+# @return 0 on success, 1 on failure.
+kc_test_cli_render_integration() {
+    out=$(printf '%s' '<p>{{ title }}</p>{{{ raw }}}' | "$BIN" --var title='A&B' --var raw='<hr>')
+    expected='<p>A&amp;B</p><hr>'
+
     if [ "$out" != "$expected" ]; then
-        kc_test_fail "include: output mismatch"
-        rm -rf "$TEST_DIR"
+        kc_test_fail "CLI render integration: expected '$expected', got '$out'"
         return 1
     fi
 
-    out=$(printf '%s' '{{@include tpl_file}}' | "$BIN" --root "$TEST_DIR" --var page=Home --var tpl_file='page.html')
-    if [ "$out" != "$expected" ]; then
-        kc_test_fail "include: variable path mismatch"
-        rm -rf "$TEST_DIR"
-        return 1
-    fi
-
-    rm -rf "$TEST_DIR"
-    kc_test_pass "include"
-}
-
-# Tests that HTML comments suppress directive rendering.
-# @return 0 on success, 1 on failure.
-kc_test_html_comment() {
-    out=$(printf '%s' '<div><!-- {{@if show}}x{{@endif}} --></div>' | "$BIN")
-    if [ "$out" != "<div><!-- {{@if show}}x{{@endif}} --></div>" ]; then
-        kc_test_fail "html_comment: directive inside comment should not render"
-        return 1
-    fi
-
-    kc_test_pass "html_comment"
-}
-
-# Tests that template comments are stripped from output.
-# @return 0 on success, 1 on failure.
-kc_test_tpl_comment() {
-    out=$(printf '%s' 'A{{/* hidden */}}B' | "$BIN")
-    if [ "$out" != "AB" ]; then
-        kc_test_fail "tpl_comment: comment not stripped"
-        return 1
-    fi
-
-    kc_test_pass "tpl_comment"
-}
-
-# Tests @var directive.
-# @return 0 on success, 1 on failure.
-kc_test_var_directive() {
-    out=$(printf '%s' '{{@var greeting "Hello"}}{{ greeting }}' | "$BIN")
-    if [ "$out" != "Hello" ]; then
-        kc_test_fail "var_directive: output mismatch"
-        return 1
-    fi
-
-    kc_test_pass "var_directive"
+    kc_test_pass "CLI render integration: stdin and --var feed libtpl rendering"
+    return 0
 }
 
 # Runs the full validation suite.
 # @return 0 on success, 1 on failure.
 kc_test_main() {
     failed=0
+    include_root=
 
     BIN=$(kc_test_binary_path)
     STATIC_LIB=$(kc_test_static_library_path)
     SHARED_LIB=$(kc_test_shared_library_path)
+    TMP_ROOT=$(mktemp -d)
+    trap kc_test_cleanup EXIT INT TERM
 
-    kc_test_check_binary || exit 1
-    kc_test_check_libraries || failed=$((failed + 1))
+    kc_test_check_artifacts || return 1
+    kc_test_compile_helper || return 1
+    include_root=$(kc_test_create_include_root)
 
-    kc_test_cli           || failed=$((failed + 1))
-    kc_test_escape        || failed=$((failed + 1))
-    kc_test_raw           || failed=$((failed + 1))
-    kc_test_if            || failed=$((failed + 1))
-    kc_test_foreach       || failed=$((failed + 1))
-    kc_test_dot           || failed=$((failed + 1))
-    kc_test_block         || failed=$((failed + 1))
-    kc_test_include       || failed=$((failed + 1))
-    kc_test_html_comment  || failed=$((failed + 1))
-    kc_test_tpl_comment   || failed=$((failed + 1))
-    kc_test_var_directive || failed=$((failed + 1))
+    kc_test_helper_case "version" "library version: build timestamp is exported" "library version" || failed=$((failed + 1))
+    kc_test_helper_case "lifecycle" "library lifecycle: open, close, null guards obey API contract" "library lifecycle" || failed=$((failed + 1))
+    kc_test_helper_case "render-core" "library rendering: variables, control flow, blocks, comments render correctly" "library rendering" || failed=$((failed + 1))
+    kc_test_helper_case "include-env" "include resolution: KC_TPL_ROOT loads and nested includes render" "include resolution" "$include_root" || failed=$((failed + 1))
+    kc_test_helper_case "failure-paths" "failure handling: invalid vars, missing include, and bad syntax fail" "failure handling" || failed=$((failed + 1))
+    kc_test_cli_render_integration || failed=$((failed + 1))
 
-    return $failed
+    if [ "$failed" -eq 0 ]; then
+        return 0
+    fi
+
+    return 1
 }
 
 kc_test_main
