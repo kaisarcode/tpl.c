@@ -1,5 +1,4 @@
 #!/bin/sh
-# test.sh
 # Summary: Validation suite for libtpl behavior and tpl runtime integration.
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
