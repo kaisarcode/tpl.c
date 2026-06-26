@@ -48,7 +48,9 @@ typedef struct {
     kc_tpl_signal_callback_t cb;
 } kc_tpl_signal_entry_t;
 
-static kc_tpl_t *g_signal_ctx = NULL;
+static kc_tpl_t **g_signal_ctx_list = NULL;
+static int g_signal_ctx_cap = 0;
+static int g_signal_ctx_count = 0;
 
 typedef struct {
     char key[64];
@@ -79,6 +81,7 @@ struct kc_tpl {
     kc_tpl_signal_entry_t *signal_handlers;
     int n_signal_handlers;
     int signal_handlers_capacity;
+    volatile sig_atomic_t stop_requested;
 };
 
 static const char *kc_tpl_comment_open = "{{/" "*";
@@ -1195,8 +1198,16 @@ int kc_tpl_open(kc_tpl_t **out, const kc_tpl_options_t *opts) {
  * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
  */
 int kc_tpl_close(kc_tpl_t *ctx) {
+    int i;
     if (ctx == NULL) {
         return KC_TPL_OK;
+    }
+
+    for (i = 0; i < g_signal_ctx_count; i++) {
+        if (g_signal_ctx_list[i] == ctx) {
+            g_signal_ctx_list[i] = g_signal_ctx_list[--g_signal_ctx_count];
+            break;
+        }
     }
 
     kc_tpl_scope_clear(&ctx->scope);
@@ -1351,6 +1362,17 @@ void kc_tpl_options_free(kc_tpl_options_t *opts) {
 }
 
 /**
+ * Request stop for a specific tpl context.
+ * @param ctx Context pointer.
+ * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
+ */
+int kc_tpl_stop(kc_tpl_t *ctx) {
+    if (!ctx) return KC_TPL_ERROR;
+    ctx->stop_requested = 1;
+    return KC_TPL_OK;
+}
+
+/**
  * Register a handler for a library-level signal number.
  * @param ctx Context pointer.
  * @param sig Application-defined signal number.
@@ -1416,7 +1438,15 @@ int kc_tpl_raise_signal(kc_tpl_t *ctx, int sig) {
  */
 int kc_tpl_listen_signals(kc_tpl_t *ctx) {
     if (!ctx) return KC_TPL_ERROR;
-    g_signal_ctx = ctx;
+    if (g_signal_ctx_count >= g_signal_ctx_cap) {
+        int new_cap = g_signal_ctx_cap ? g_signal_ctx_cap * 2 : 4;
+        kc_tpl_t **new_list = (kc_tpl_t **)realloc(g_signal_ctx_list,
+            (size_t)new_cap * sizeof(kc_tpl_t *));
+        if (!new_list) return KC_TPL_ERROR;
+        g_signal_ctx_list = new_list;
+        g_signal_ctx_cap = new_cap;
+    }
+    g_signal_ctx_list[g_signal_ctx_count++] = ctx;
     return KC_TPL_OK;
 }
 
@@ -1428,7 +1458,15 @@ int kc_tpl_listen_signals(kc_tpl_t *ctx) {
  */
 int kc_tpl_listen_signal(kc_tpl_t *ctx, int sig_id) {
     if (!ctx) return KC_TPL_ERROR;
-    g_signal_ctx = ctx;
+    if (g_signal_ctx_count >= g_signal_ctx_cap) {
+        int new_cap = g_signal_ctx_cap ? g_signal_ctx_cap * 2 : 4;
+        kc_tpl_t **new_list = (kc_tpl_t **)realloc(g_signal_ctx_list,
+            (size_t)new_cap * sizeof(kc_tpl_t *));
+        if (!new_list) return KC_TPL_ERROR;
+        g_signal_ctx_list = new_list;
+        g_signal_ctx_cap = new_cap;
+    }
+    g_signal_ctx_list[g_signal_ctx_count++] = ctx;
 #ifdef _WIN32
     (void)sig_id;
 #else
@@ -1443,8 +1481,12 @@ int kc_tpl_listen_signal(kc_tpl_t *ctx, int sig_id) {
  * @return None.
  */
 void kc_tpl_signal_listener(int sig) {
-    if (g_signal_ctx && kc_tpl_raise_signal(g_signal_ctx, sig) == 0)
-        return;
+    int i;
+    for (i = 0; i < g_signal_ctx_count; i++) {
+        if (g_signal_ctx_list[i] &&
+            kc_tpl_raise_signal(g_signal_ctx_list[i], sig) == 0)
+            return;
+    }
     signal(sig, SIG_DFL);
     raise(sig);
 }

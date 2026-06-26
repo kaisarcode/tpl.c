@@ -353,6 +353,48 @@ kc_test_cli_render_integration() {
     return 0
 }
 
+# Tests multi-context isolation: two contexts, stop one, other unaffected.
+# @return 0 on success, 1 on failure.
+kc_test_multi_context() {
+    tmpdir=$(mktemp -d)
+
+    {
+        printf '%s\n' '#include "tpl.h"'
+        printf '%s\n' '#include <stdio.h>'
+        printf '%s\n' '#include <stdlib.h>'
+        printf '%s\n' '#include <string.h>'
+        printf '%s\n' 'int main(void) {'
+        printf '%s\n' '    kc_tpl_options_t opts = kc_tpl_options_default();'
+        printf '%s\n' '    kc_tpl_t *ctx1, *ctx2;'
+        printf '%s\n' '    char *out1 = NULL, *out2 = NULL;'
+        printf '%s\n' '    if (kc_tpl_open(&ctx1, &opts) != KC_TPL_OK) return 1;'
+        printf '%s\n' '    if (kc_tpl_open(&ctx2, &opts) != KC_TPL_OK) { kc_tpl_close(ctx1); return 1; }'
+        printf '%s\n' '    if (kc_tpl_stop(NULL) != KC_TPL_ERROR) { kc_tpl_close(ctx1); kc_tpl_close(ctx2); return 2; }'
+        printf '%s\n' '    if (kc_tpl_stop(ctx1) != KC_TPL_OK) { kc_tpl_close(ctx1); kc_tpl_close(ctx2); return 3; }'
+        printf '%s\n' '    if (kc_tpl_set_var(ctx2, "x", "42") != KC_TPL_OK) { kc_tpl_close(ctx1); kc_tpl_close(ctx2); return 4; }'
+        printf '%s\n' '    if (kc_tpl_render_string(ctx2, "{{ x }}", &out2) != KC_TPL_OK) { free(out2); kc_tpl_close(ctx1); kc_tpl_close(ctx2); return 5; }'
+        printf '%s\n' '    if (strcmp(out2, "42") != 0) { free(out2); kc_tpl_close(ctx1); kc_tpl_close(ctx2); return 6; }'
+        printf '%s\n' '    free(out2); kc_tpl_close(ctx1); kc_tpl_close(ctx2);'
+        printf '%s\n' '    return 0;'
+        printf '%s\n' '}'
+    } > "$tmpdir/multictx.c"
+
+    cc -I "$PWD/src" "$tmpdir/multictx.c" -L"$PWD/bin/x86_64/linux" -ltpl -o "$tmpdir/multictx" -Wl,-rpath,"$PWD/bin/x86_64/linux" || {
+        kc_test_fail "multi_context: compile failed"
+        rm -rf "$tmpdir"
+        return 1
+    }
+
+    if ! "$tmpdir/multictx"; then
+        kc_test_fail "multi_context: run failed"
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    rm -rf "$tmpdir"
+    kc_test_pass "multi_context"
+}
+
 # Runs the full validation suite.
 # @return 0 on success, 1 on failure.
 kc_test_main() {
@@ -375,6 +417,8 @@ kc_test_main() {
     kc_test_helper_case "include-env" "include resolution: KC_TPL_ROOT loads and nested includes render" "include resolution" "$include_root" || failed=$((failed + 1))
     kc_test_helper_case "failure-paths" "failure handling: invalid vars, missing include, and bad syntax fail" "failure handling" || failed=$((failed + 1))
     kc_test_cli_render_integration || failed=$((failed + 1))
+
+    kc_test_multi_context || failed=$((failed + 1))
 
     if [ "$failed" -eq 0 ]; then
         return 0

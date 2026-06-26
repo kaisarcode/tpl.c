@@ -20,6 +20,7 @@ typedef struct kc_tpl kc_tpl_t;
 
 #define KC_TPL_OK      0
 #define KC_TPL_ERROR  -1
+#define KC_TPL_ESTOP  -3
 
 typedef struct {
     char *root;
@@ -46,6 +47,13 @@ void kc_tpl_options_load_env(kc_tpl_options_t *opts);
  * @return None.
  */
 void kc_tpl_options_free(kc_tpl_options_t *opts);
+
+/**
+ * Request stop for a specific tpl context.
+ * @param ctx Context pointer.
+ * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
+ */
+int kc_tpl_stop(kc_tpl_t *ctx);
 
 /**
  * Register a handler for a library-level signal number.
