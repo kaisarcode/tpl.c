@@ -95,6 +95,19 @@ Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host arc
 make clean && make
 ```
 
+Run the portable native test suite after building the artifacts:
+
+```bash
+make test
+```
+
+Run the Windows test suite through Wine after building `x86_64/windows` artifacts:
+
+```bash
+make x86_64/windows
+make test wine
+```
+
 ### Multiarch Builds
 
 The project is prepared to build artifacts for multiple architectures under `bin/{arch}/{platform}/`. A plain `make` builds only the current host architecture.
