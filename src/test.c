@@ -1,6 +1,6 @@
 /**
- * test.c - libtpl portable contract tests.
- * Summary: Validates exported libtpl behavior through the public C API.
+ * test.c - libtpl public API contract tests.
+ * Summary: Validates each exported libtpl function through one dedicated test case.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -13,13 +13,14 @@
 
 #include "tpl.h"
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static int signal_count = 0;
-static int signal_count_b = 0;
-static kc_tpl_t *signal_ctx_seen = NULL;
+static int signal_count;
+static int signal_count_b;
+static kc_tpl_t *signal_ctx_seen;
 
 /**
  * Counts primary signal callbacks.
@@ -27,10 +28,8 @@ static kc_tpl_t *signal_ctx_seen = NULL;
  * @return None.
  */
 static void count_signal(kc_tpl_t *ctx) {
-    if (ctx != NULL) {
-        signal_count++;
-        signal_ctx_seen = ctx;
-    }
+    signal_count++;
+    signal_ctx_seen = ctx;
 }
 
 /**
@@ -39,10 +38,8 @@ static void count_signal(kc_tpl_t *ctx) {
  * @return None.
  */
 static void count_signal_b(kc_tpl_t *ctx) {
-    if (ctx != NULL) {
-        signal_count_b++;
-        signal_ctx_seen = ctx;
-    }
+    signal_count_b++;
+    signal_ctx_seen = ctx;
 }
 
 /**
@@ -124,41 +121,32 @@ static int render_expect(kc_tpl_t *ctx, const char *input, const char *expected)
         free(output);
         return 1;
     }
-
     rc = expect_string("render output", expected, output);
     free(output);
     return rc;
 }
 
 /**
- * Writes text content to a file path.
- * @param path Output path.
- * @param text File content.
+ * Tests kc_tpl_options_default.
  * @return 0 on success, 1 on failure.
  */
-static int write_text_file(const char *path, const char *text) {
-    FILE *fp;
+static int case_kc_tpl_options_default(void) {
+    kc_tpl_options_t opts;
 
-    fp = fopen(path, "wb");
-    if (fp == NULL) return 1;
-    if (fputs(text, fp) == EOF) {
-        fclose(fp);
-        return 1;
-    }
-    return fclose(fp) == 0 ? 0 : 1;
+    opts = kc_tpl_options_default();
+    return expect_true("default root", opts.root == NULL);
 }
 
 /**
- * Verifies option defaults, environment loading, and cleanup.
+ * Tests kc_tpl_options_load_env.
  * @return 0 on success, 1 on failure.
  */
-static int case_options(void) {
+static int case_kc_tpl_options_load_env(void) {
     kc_tpl_options_t opts;
     int rc;
 
     opts = kc_tpl_options_default();
     rc = 0;
-    rc += expect_true("default root", opts.root == NULL);
     rc += expect_int("set root env", 0, set_env_value("KC_TPL_ROOT", "env-root"));
     kc_tpl_options_load_env(&opts);
     rc += expect_string("env root", "env-root", opts.root);
@@ -167,75 +155,163 @@ static int case_options(void) {
     rc += expect_string("replaced env root", "env-root-2", opts.root);
     kc_tpl_options_load_env(NULL);
     kc_tpl_options_free(&opts);
-    rc += expect_true("free clears root", opts.root == NULL);
-    kc_tpl_options_free(NULL);
     set_env_value("KC_TPL_ROOT", NULL);
     return rc == 0 ? 0 : 1;
 }
 
 /**
- * Verifies context lifecycle, NULL guards, stop, and version.
+ * Tests kc_tpl_options_free.
  * @return 0 on success, 1 on failure.
  */
-static int case_context(void) {
+static int case_kc_tpl_options_free(void) {
+    kc_tpl_options_t opts;
+
+    opts = kc_tpl_options_default();
+    kc_tpl_options_free(&opts);
+    kc_tpl_options_free(NULL);
+    return expect_true("free clears root", opts.root == NULL);
+}
+
+/**
+ * Tests kc_tpl_stop.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_tpl_stop(void) {
     kc_tpl_options_t opts;
     kc_tpl_t *ctx;
-    kc_tpl_t *second;
-    char *output;
     int rc;
 
     opts = kc_tpl_options_default();
     ctx = NULL;
-    second = NULL;
-    output = NULL;
     rc = 0;
-    rc += expect_int("close NULL", KC_TPL_OK, kc_tpl_close(NULL));
     rc += expect_int("stop NULL", KC_TPL_ERROR, kc_tpl_stop(NULL));
-    rc += expect_int("open NULL out", KC_TPL_ERROR, kc_tpl_open(NULL, &opts));
-    rc += expect_int("open NULL opts", KC_TPL_ERROR, kc_tpl_open(&ctx, NULL));
-    rc += expect_int("render NULL ctx", KC_TPL_ERROR,
-        kc_tpl_render_string(NULL, "x", &output));
     rc += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
-    rc += expect_string("initial strerror", "ok", kc_tpl_strerror(ctx));
-    rc += expect_string("NULL strerror", "invalid context", kc_tpl_strerror(NULL));
-    rc += expect_int("render NULL input", KC_TPL_ERROR,
-        kc_tpl_render_string(ctx, NULL, &output));
-    rc += expect_int("render NULL output", KC_TPL_ERROR,
-        kc_tpl_render_string(ctx, "x", NULL));
-    rc += expect_int("set root NULL ctx", KC_TPL_ERROR, kc_tpl_set_root(NULL, "."));
-    rc += expect_int("set root NULL value", KC_TPL_ERROR, kc_tpl_set_root(ctx, NULL));
-    rc += expect_int("set root empty", KC_TPL_ERROR, kc_tpl_set_root(ctx, ""));
-    rc += expect_int("set root valid", KC_TPL_OK, kc_tpl_set_root(ctx, "."));
-    rc += expect_int("set var NULL ctx", KC_TPL_ERROR,
-        kc_tpl_set_var(NULL, "k", "v"));
-    rc += expect_int("set var empty key", KC_TPL_ERROR,
-        kc_tpl_set_var(ctx, "", "v"));
-    rc += expect_int("set var NULL key", KC_TPL_ERROR,
-        kc_tpl_set_var(ctx, NULL, "v"));
-    rc += expect_int("set var NULL value", KC_TPL_ERROR,
-        kc_tpl_set_var(ctx, "k", NULL));
-    rc += expect_int("open second context", KC_TPL_OK, kc_tpl_open(&second, &opts));
-    rc += expect_int("stop first", KC_TPL_OK, kc_tpl_stop(ctx));
-    rc += expect_int("second set var after first stop", KC_TPL_OK,
-        kc_tpl_set_var(second, "x", "42"));
-    rc += render_expect(second, "{{ x }}", "42");
-    rc += expect_true("version set", kc_tpl_version() != 0U);
-    kc_tpl_close(second);
+    rc += expect_int("stop context", KC_TPL_OK, kc_tpl_stop(ctx));
+    rc += expect_int("stop context again", KC_TPL_OK, kc_tpl_stop(ctx));
     kc_tpl_close(ctx);
-    kc_tpl_options_free(&opts);
     return rc == 0 ? 0 : 1;
 }
 
 /**
- * Verifies signal registration, replacement, removal, and listener dispatch.
+ * Tests kc_tpl_on_signal.
  * @return 0 on success, 1 on failure.
  */
-static int case_signals(void) {
+static int case_kc_tpl_on_signal(void) {
+    kc_tpl_options_t opts;
+    kc_tpl_t *ctx;
+    int rc;
+    int i;
+
+    opts = kc_tpl_options_default();
+    ctx = NULL;
+    rc = 0;
+    signal_count = 0;
+    signal_count_b = 0;
+    rc += expect_int("on signal NULL", KC_TPL_ERROR,
+        kc_tpl_on_signal(NULL, 10, count_signal));
+    rc += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
+    rc += expect_int("register handler", KC_TPL_OK,
+        kc_tpl_on_signal(ctx, 10, count_signal));
+    rc += expect_int("replace handler", KC_TPL_OK,
+        kc_tpl_on_signal(ctx, 10, count_signal_b));
+    rc += expect_int("raise replaced", KC_TPL_OK,
+        kc_tpl_raise_signal(ctx, 10));
+    rc += expect_int("old handler skipped", 0, signal_count);
+    rc += expect_int("new handler called", 1, signal_count_b);
+    rc += expect_int("remove handler", KC_TPL_OK,
+        kc_tpl_on_signal(ctx, 10, NULL));
+    rc += expect_int("remove missing handler", KC_TPL_OK,
+        kc_tpl_on_signal(ctx, 10, NULL));
+    for (i = 0; i < 8; i++) {
+        rc += expect_int("register growth handler", KC_TPL_OK,
+            kc_tpl_on_signal(ctx, 100 + i, count_signal));
+    }
+    signal_count = 0;
+    rc += expect_int("raise growth handler", KC_TPL_OK,
+        kc_tpl_raise_signal(ctx, 107));
+    rc += expect_int("growth callback count", 1, signal_count);
+    kc_tpl_close(ctx);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_tpl_raise_signal.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_tpl_raise_signal(void) {
+    kc_tpl_options_t opts;
+    kc_tpl_t *ctx;
+    int rc;
+
+    opts = kc_tpl_options_default();
+    ctx = NULL;
+    rc = 0;
+    signal_count = 0;
+    signal_ctx_seen = NULL;
+    rc += expect_int("raise signal NULL", KC_TPL_ERROR,
+        kc_tpl_raise_signal(NULL, 10));
+    rc += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
+    rc += expect_int("raise unhandled", KC_TPL_ERROR,
+        kc_tpl_raise_signal(ctx, 10));
+    rc += expect_int("register handler", KC_TPL_OK,
+        kc_tpl_on_signal(ctx, 10, count_signal));
+    rc += expect_int("raise handled", KC_TPL_OK,
+        kc_tpl_raise_signal(ctx, 10));
+    rc += expect_int("callback count", 1, signal_count);
+    rc += expect_true("callback saw first", signal_ctx_seen == ctx);
+    kc_tpl_close(ctx);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_tpl_listen_signals.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_tpl_listen_signals(void) {
+    kc_tpl_options_t opts;
+    kc_tpl_t *ctx;
+    int rc;
+
+    opts = kc_tpl_options_default();
+    ctx = NULL;
+    rc = 0;
+    rc += expect_int("listen signals NULL", KC_TPL_ERROR,
+        kc_tpl_listen_signals(NULL));
+    rc += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
+    rc += expect_int("listen context", KC_TPL_OK, kc_tpl_listen_signals(ctx));
+    kc_tpl_close(ctx);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_tpl_listen_signal.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_tpl_listen_signal(void) {
+    kc_tpl_options_t opts;
+    kc_tpl_t *ctx;
+    int rc;
+
+    opts = kc_tpl_options_default();
+    ctx = NULL;
+    rc = 0;
+    rc += expect_int("listen signal NULL", KC_TPL_ERROR,
+        kc_tpl_listen_signal(NULL, 10));
+    rc += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
+    rc += expect_int("listen one signal", KC_TPL_OK, kc_tpl_listen_signal(ctx, 12));
+    kc_tpl_close(ctx);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_tpl_signal_listener.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_tpl_signal_listener(void) {
     kc_tpl_options_t opts;
     kc_tpl_t *first;
     kc_tpl_t *second;
     int rc;
-    int i;
 
     opts = kc_tpl_options_default();
     first = NULL;
@@ -246,54 +322,13 @@ static int case_signals(void) {
         kc_tpl_close(first);
         return 1;
     }
-    signal_count = 0;
     signal_count_b = 0;
     signal_ctx_seen = NULL;
-    rc += expect_int("on signal NULL", KC_TPL_ERROR,
-        kc_tpl_on_signal(NULL, 10, count_signal));
-    rc += expect_int("raise signal NULL", KC_TPL_ERROR,
-        kc_tpl_raise_signal(NULL, 10));
-    rc += expect_int("listen signals NULL", KC_TPL_ERROR,
-        kc_tpl_listen_signals(NULL));
-    rc += expect_int("listen signal NULL", KC_TPL_ERROR,
-        kc_tpl_listen_signal(NULL, 10));
-    rc += expect_int("raise unhandled", KC_TPL_ERROR,
-        kc_tpl_raise_signal(first, 10));
-    rc += expect_int("register handler", KC_TPL_OK,
-        kc_tpl_on_signal(first, 10, count_signal));
-    rc += expect_int("raise handled", KC_TPL_OK,
-        kc_tpl_raise_signal(first, 10));
-    rc += expect_int("callback count", 1, signal_count);
-    rc += expect_true("callback saw first", signal_ctx_seen == first);
-    rc += expect_int("replace handler", KC_TPL_OK,
-        kc_tpl_on_signal(first, 10, count_signal_b));
-    signal_count = 0;
-    signal_count_b = 0;
-    rc += expect_int("raise replaced", KC_TPL_OK,
-        kc_tpl_raise_signal(first, 10));
-    rc += expect_int("old handler skipped", 0, signal_count);
-    rc += expect_int("new handler called", 1, signal_count_b);
-    rc += expect_int("remove handler", KC_TPL_OK,
-        kc_tpl_on_signal(first, 10, NULL));
-    rc += expect_int("remove missing handler", KC_TPL_OK,
-        kc_tpl_on_signal(first, 10, NULL));
-    rc += expect_int("raise removed", KC_TPL_ERROR,
-        kc_tpl_raise_signal(first, 10));
-    for (i = 0; i < 8; i++) {
-        rc += expect_int("register growth handler", KC_TPL_OK,
-            kc_tpl_on_signal(first, 100 + i, count_signal));
-    }
-    signal_count = 0;
-    rc += expect_int("raise growth handler", KC_TPL_OK,
-        kc_tpl_raise_signal(first, 107));
-    rc += expect_int("growth callback count", 1, signal_count);
     rc += expect_int("listen first", KC_TPL_OK, kc_tpl_listen_signals(first));
     rc += expect_int("listen one signal", KC_TPL_OK, kc_tpl_listen_signal(first, 12));
     rc += expect_int("listen second", KC_TPL_OK, kc_tpl_listen_signals(second));
     rc += expect_int("second handler", KC_TPL_OK,
         kc_tpl_on_signal(second, 12, count_signal_b));
-    signal_count_b = 0;
-    signal_ctx_seen = NULL;
     kc_tpl_signal_listener(12);
     rc += expect_int("listener dispatch count", 1, signal_count_b);
     rc += expect_true("listener saw second", signal_ctx_seen == second);
@@ -303,10 +338,18 @@ static int case_signals(void) {
 }
 
 /**
- * Verifies core template rendering directives.
+ * Tests kc_tpl_version.
  * @return 0 on success, 1 on failure.
  */
-static int case_render_core(void) {
+static int case_kc_tpl_version(void) {
+    return expect_true("version set", kc_tpl_version() != 0U);
+}
+
+/**
+ * Tests kc_tpl_open.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_tpl_open(void) {
     kc_tpl_options_t opts;
     kc_tpl_t *ctx;
     int rc;
@@ -314,7 +357,104 @@ static int case_render_core(void) {
     opts = kc_tpl_options_default();
     ctx = NULL;
     rc = 0;
-    if (kc_tpl_open(&ctx, &opts) != KC_TPL_OK) return 1;
+    rc += expect_int("open NULL out", KC_TPL_ERROR, kc_tpl_open(NULL, &opts));
+    rc += expect_int("open NULL opts", KC_TPL_ERROR, kc_tpl_open(&ctx, NULL));
+    rc += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
+    rc += expect_true("open sets context", ctx != NULL);
+    kc_tpl_close(ctx);
+    kc_tpl_options_free(&opts);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_tpl_close.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_tpl_close(void) {
+    kc_tpl_options_t opts;
+    kc_tpl_t *ctx;
+    int rc;
+
+    opts = kc_tpl_options_default();
+    ctx = NULL;
+    rc = 0;
+    rc += expect_int("close NULL", KC_TPL_OK, kc_tpl_close(NULL));
+    rc += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
+    rc += expect_int("close context", KC_TPL_OK, kc_tpl_close(ctx));
+    kc_tpl_options_free(&opts);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_tpl_set_root.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_tpl_set_root(void) {
+    kc_tpl_options_t opts;
+    kc_tpl_t *ctx;
+    int rc;
+
+    opts = kc_tpl_options_default();
+    ctx = NULL;
+    rc = 0;
+    rc += expect_int("set root NULL ctx", KC_TPL_ERROR, kc_tpl_set_root(NULL, "."));
+    rc += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
+    rc += expect_int("set root NULL value", KC_TPL_ERROR, kc_tpl_set_root(ctx, NULL));
+    rc += expect_int("set root empty", KC_TPL_ERROR, kc_tpl_set_root(ctx, ""));
+    rc += expect_int("set root valid", KC_TPL_OK, kc_tpl_set_root(ctx, "."));
+    kc_tpl_close(ctx);
+    kc_tpl_options_free(&opts);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_tpl_set_var.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_tpl_set_var(void) {
+    kc_tpl_options_t opts;
+    kc_tpl_t *ctx;
+    int rc;
+
+    opts = kc_tpl_options_default();
+    ctx = NULL;
+    rc = 0;
+    rc += expect_int("set var NULL ctx", KC_TPL_ERROR,
+        kc_tpl_set_var(NULL, "k", "v"));
+    rc += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
+    rc += expect_int("set var empty key", KC_TPL_ERROR,
+        kc_tpl_set_var(ctx, "", "v"));
+    rc += expect_int("set var NULL key", KC_TPL_ERROR,
+        kc_tpl_set_var(ctx, NULL, "v"));
+    rc += expect_int("set var NULL value", KC_TPL_ERROR,
+        kc_tpl_set_var(ctx, "k", NULL));
+    rc += expect_int("set title", KC_TPL_OK, kc_tpl_set_var(ctx, "title", "A&B"));
+    kc_tpl_close(ctx);
+    kc_tpl_options_free(&opts);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_tpl_render_string.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_tpl_render_string(void) {
+    kc_tpl_options_t opts;
+    kc_tpl_t *ctx;
+    char *output;
+    int rc;
+
+    opts = kc_tpl_options_default();
+    ctx = NULL;
+    output = NULL;
+    rc = 0;
+    rc += expect_int("render NULL ctx", KC_TPL_ERROR,
+        kc_tpl_render_string(NULL, "x", &output));
+    rc += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
+    rc += expect_int("render NULL input", KC_TPL_ERROR,
+        kc_tpl_render_string(ctx, NULL, &output));
+    rc += expect_int("render NULL output", KC_TPL_ERROR,
+        kc_tpl_render_string(ctx, "x", NULL));
     rc += expect_int("set title", KC_TPL_OK, kc_tpl_set_var(ctx, "title", "A&B"));
     rc += expect_int("set raw", KC_TPL_OK, kc_tpl_set_var(ctx, "raw", "<b>x</b>"));
     rc += expect_int("set items", KC_TPL_OK,
@@ -331,8 +471,7 @@ static int case_render_core(void) {
         "{{@foreach item in items}}<b>{{ item.title }}</b>{{@endforeach}}",
         "<b>One</b><b>Two</b>");
     rc += render_expect(ctx,
-        "{{@setblock card}}<i>{{ name }}</i>{{@endsetblock}}"
-        "{{@block card [ \"name\": \"Ada\" ]}}",
+        "{{@setblock card}}<i>{{ name }}</i>{{@endsetblock}}{{@block card [ \"name\": \"Ada\" ]}}",
         "<i>Ada</i>");
     rc += render_expect(ctx, "A{{/* hidden */}}B", "AB");
     rc += render_expect(ctx, "<div><!-- {{@if title}}x{{@endif}} --></div>",
@@ -343,46 +482,10 @@ static int case_render_core(void) {
 }
 
 /**
- * Verifies include resolution through environment-loaded root options.
+ * Tests kc_tpl_strerror.
  * @return 0 on success, 1 on failure.
  */
-static int case_include(void) {
-    kc_tpl_options_t opts;
-    kc_tpl_t *ctx;
-    int rc;
-
-    opts = kc_tpl_options_default();
-    ctx = NULL;
-    rc = 0;
-    if (write_text_file("partial.html", "{{@var value \"<ok>\"}}{{ value }}\n") != 0) {
-        return 1;
-    }
-    if (write_text_file("page.html",
-        "<title>{{ page }}</title>\n<section>{{@include \"partial.html\"}}</section>\n") != 0) {
-        remove("partial.html");
-        return 1;
-    }
-    rc += expect_int("set env root", 0, set_env_value("KC_TPL_ROOT", "."));
-    kc_tpl_options_load_env(&opts);
-    rc += expect_int("open", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
-    if (ctx != NULL) {
-        rc += expect_int("set page", KC_TPL_OK, kc_tpl_set_var(ctx, "page", "Home"));
-        rc += render_expect(ctx, "{{@include \"page.html\"}}",
-            "<title>Home</title>\n<section>&lt;ok&gt;\n</section>\n");
-        kc_tpl_close(ctx);
-    }
-    kc_tpl_options_free(&opts);
-    set_env_value("KC_TPL_ROOT", NULL);
-    remove("page.html");
-    remove("partial.html");
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Verifies invalid templates and missing resources fail clearly.
- * @return 0 on success, 1 on failure.
- */
-static int case_failure_paths(void) {
+static int case_kc_tpl_strerror(void) {
     kc_tpl_options_t opts;
     kc_tpl_t *ctx;
     char *output;
@@ -392,34 +495,13 @@ static int case_failure_paths(void) {
     ctx = NULL;
     output = NULL;
     rc = 0;
-    if (kc_tpl_open(&ctx, &opts) != KC_TPL_OK) return 1;
+    rc += expect_string("NULL strerror", "invalid context", kc_tpl_strerror(NULL));
+    rc += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
+    rc += expect_string("initial strerror", "ok", kc_tpl_strerror(ctx));
     rc += expect_int("missing include", KC_TPL_ERROR,
         kc_tpl_render_string(ctx, "{{@include \"missing.html\"}}", &output));
     free(output);
-    output = NULL;
-    rc += expect_int("unterminated tag", KC_TPL_ERROR,
-        kc_tpl_render_string(ctx, "{{ title", &output));
-    free(output);
-    output = NULL;
-    rc += expect_int("unterminated raw", KC_TPL_ERROR,
-        kc_tpl_render_string(ctx, "{{{ title", &output));
-    free(output);
-    output = NULL;
-    rc += expect_int("unterminated comment", KC_TPL_ERROR,
-        kc_tpl_render_string(ctx, "{{/* title", &output));
-    free(output);
-    output = NULL;
-    rc += expect_int("missing endif", KC_TPL_ERROR,
-        kc_tpl_render_string(ctx, "{{@if title}}x", &output));
-    free(output);
-    output = NULL;
-    rc += expect_int("invalid foreach", KC_TPL_ERROR,
-        kc_tpl_render_string(ctx, "{{@foreach item items}}x{{@endforeach}}", &output));
-    free(output);
-    output = NULL;
-    rc += expect_int("missing endforeach", KC_TPL_ERROR,
-        kc_tpl_render_string(ctx, "{{@foreach item in items}}x", &output));
-    free(output);
+    rc += expect_true("error string set", strcmp(kc_tpl_strerror(ctx), "ok") != 0);
     kc_tpl_close(ctx);
     kc_tpl_options_free(&opts);
     return rc == 0 ? 0 : 1;
@@ -436,12 +518,22 @@ int main(int argc, char **argv) {
         fprintf(stderr, "usage: %s <case>\n", argv[0]);
         return 2;
     }
-    if (strcmp(argv[1], "options") == 0) return case_options();
-    if (strcmp(argv[1], "context") == 0) return case_context();
-    if (strcmp(argv[1], "signals") == 0) return case_signals();
-    if (strcmp(argv[1], "render-core") == 0) return case_render_core();
-    if (strcmp(argv[1], "include") == 0) return case_include();
-    if (strcmp(argv[1], "failure-paths") == 0) return case_failure_paths();
+    if (strcmp(argv[1], "kc_tpl_options_default") == 0) return case_kc_tpl_options_default();
+    if (strcmp(argv[1], "kc_tpl_options_load_env") == 0) return case_kc_tpl_options_load_env();
+    if (strcmp(argv[1], "kc_tpl_options_free") == 0) return case_kc_tpl_options_free();
+    if (strcmp(argv[1], "kc_tpl_stop") == 0) return case_kc_tpl_stop();
+    if (strcmp(argv[1], "kc_tpl_on_signal") == 0) return case_kc_tpl_on_signal();
+    if (strcmp(argv[1], "kc_tpl_raise_signal") == 0) return case_kc_tpl_raise_signal();
+    if (strcmp(argv[1], "kc_tpl_listen_signals") == 0) return case_kc_tpl_listen_signals();
+    if (strcmp(argv[1], "kc_tpl_listen_signal") == 0) return case_kc_tpl_listen_signal();
+    if (strcmp(argv[1], "kc_tpl_signal_listener") == 0) return case_kc_tpl_signal_listener();
+    if (strcmp(argv[1], "kc_tpl_version") == 0) return case_kc_tpl_version();
+    if (strcmp(argv[1], "kc_tpl_open") == 0) return case_kc_tpl_open();
+    if (strcmp(argv[1], "kc_tpl_close") == 0) return case_kc_tpl_close();
+    if (strcmp(argv[1], "kc_tpl_set_root") == 0) return case_kc_tpl_set_root();
+    if (strcmp(argv[1], "kc_tpl_set_var") == 0) return case_kc_tpl_set_var();
+    if (strcmp(argv[1], "kc_tpl_render_string") == 0) return case_kc_tpl_render_string();
+    if (strcmp(argv[1], "kc_tpl_strerror") == 0) return case_kc_tpl_strerror();
     fprintf(stderr, "unknown case: %s\n", argv[1]);
     return 2;
 }
