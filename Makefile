@@ -230,21 +230,28 @@ define macos_target
 		echo "Set OSXCROSS_ROOT to your osxcross target dir and ensure the wrappers are built." >&2; \
 		exit 1; \
 	fi
-	@if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ]; then \
-		PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-macos \
+	@export OSXCROSS_HOST=$(1)-apple-darwin25.1 && \
+	export OSXCROSS_TARGET_DIR=$(OSXCROSS_ROOT) && \
+	export OSXCROSS_TARGET=darwin25.1 && \
+	export OSXCROSS_SDK=$(OSXCROSS_ROOT)/SDK/MacOSX26.1.sdk && \
+	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
+	if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ]; then \
+		cmake -S . -B $(BUILD_DIR)/$(1)-macos \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Darwin \
 			-DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) \
 			-DTPL_BUILD_VERSION=$(BUILD_VERSION) \
 			-DCMAKE_C_COMPILER=$(2) \
+			-DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar \
+			-DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out \
 			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
 			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
 			-G Ninja -Wno-dev > /dev/null; \
-	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-macos,PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-macos -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) -DTPL_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -G Ninja -Wno-dev > /dev/null,PATH="$(OSXCROSS_ROOT)/bin:$$PATH")
-	@cp $(BUILD_DIR)/$(1)-macos/out/tpl $(BIN_DIR)/$(1)/macos/tpl
-	@echo "OK $(1)/macos"
+	fi && \
+	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
+	cp $(BUILD_DIR)/$(1)-macos/out/tpl $(BIN_DIR)/$(1)/macos/tpl && \
+	echo "OK $(1)/macos"
 endef
 
 x86_64/macos:
@@ -267,8 +274,13 @@ define ios_target
 		echo "Set $(4) to an installed Apple SDK directory." >&2; \
 		exit 1; \
 	fi
-	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/build.ninja ]; then \
-		PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-$(2) \
+	@export OSXCROSS_HOST=$(1)-apple-darwin25.1 && \
+	export OSXCROSS_TARGET_DIR=$(OSXCROSS_ROOT) && \
+	export OSXCROSS_TARGET=darwin25.1 && \
+	export OSXCROSS_SDK=$(OSXCROSS_ROOT)/SDK/MacOSX26.1.sdk && \
+	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
+	if [ ! -f $(BUILD_DIR)/$(1)-$(2)/build.ninja ]; then \
+		cmake -S . -B $(BUILD_DIR)/$(1)-$(2) \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=iOS \
 			-DCMAKE_SYSTEM_VERSION=$(IOS_DEPLOYMENT_TARGET) \
@@ -277,21 +289,23 @@ define ios_target
 			-DCMAKE_OSX_ARCHITECTURES=$(6) \
 			-DTPL_BUILD_VERSION=$(BUILD_VERSION) \
 			-DCMAKE_C_COMPILER=$(3) \
+			-DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar \
+			-DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out \
 			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
 			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
 			-G Ninja -Wno-dev > /dev/null; \
-	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_VERSION=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_SYSROOT=$(5) -DCMAKE_OSX_ARCHITECTURES=$(6) -DTPL_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(3) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null,PATH="$(OSXCROSS_ROOT)/bin:$$PATH")
-	@if [ -f $(BUILD_DIR)/$(1)-$(2)/out/tpl ]; then \
+	fi && \
+	cmake --build $(BUILD_DIR)/$(1)-$(2) 2>&1 && \
+	if [ -f $(BUILD_DIR)/$(1)-$(2)/out/tpl ]; then \
 		cp $(BUILD_DIR)/$(1)-$(2)/out/tpl $(BIN_DIR)/$(1)/$(2)/tpl; \
 	elif [ -f $(BUILD_DIR)/$(1)-$(2)/out/tpl.app/tpl ]; then \
 		cp $(BUILD_DIR)/$(1)-$(2)/out/tpl.app/tpl $(BIN_DIR)/$(1)/$(2)/tpl; \
 	else \
 		echo "Missing built iOS executable for $(1)/$(2)" >&2; \
 		exit 1; \
-	fi
-	@echo "OK $(1)/$(2)"
+	fi && \
+	echo "OK $(1)/$(2)"
 endef
 
 aarch64/ios:

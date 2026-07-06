@@ -154,6 +154,7 @@ static void kc_print_help(const char *name) {
     printf("Options:\n");
     printf("    --root <dir>        Base directory for includes (default: cwd)\n");
     printf("    --var <key=value>   Inject a template variable (repeatable)\n");
+    printf("    --ctrl <path>       Control socket path\n");
     printf("    --until N           Request delimiter byte (default 4)\n");
     printf("    -h, --help          Show this help\n");
     printf("    -v, --version       Show version\n");
@@ -206,6 +207,8 @@ static int kc_tpl_parse_args(kc_tpl_t *ctx, int argc, char **argv) {
             if (kc_tpl_set_pair(ctx, argv[i]) != KC_TPL_OK) {
                 return KC_TPL_ERROR;
             }
+        } else if (strcmp(argv[i], "--ctrl") == 0) {
+            i++;
         } else if (strcmp(argv[i], "--until") == 0) {
             i++;
         } else {
@@ -246,6 +249,15 @@ int main(int argc, char **argv) {
             kc_tpl_options_free(&opts);
             return 0;
         }
+        if (strcmp(argv[i], "--ctrl") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "tpl: --ctrl requires an argument\n");
+                kc_tpl_options_free(&opts);
+                return 1;
+            }
+            free(opts.ctrl_path);
+            opts.ctrl_path = strdup(argv[++i]);
+        }
         if (strcmp(argv[i], "--until") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "tpl: --until requires an argument\n");
@@ -275,6 +287,15 @@ int main(int argc, char **argv) {
     kc_tpl_listen_signal(ctx, 15);
 #endif
 
+    if (opts.ctrl_path) {
+        if (kc_tpl_ctrl_open(ctx, opts.ctrl_path) != KC_TPL_OK) {
+            fprintf(stderr, "tpl: failed to open control socket at %s\n", opts.ctrl_path);
+            kc_tpl_close(ctx);
+            kc_tpl_options_free(&opts);
+            return 1;
+        }
+    }
+
     parse_rc = kc_tpl_parse_args(ctx, argc, argv);
     if (parse_rc == 1) {
         kc_tpl_close(ctx);
@@ -289,6 +310,7 @@ int main(int argc, char **argv) {
     }
 
     for (;;) {
+        kc_tpl_ctrl_poll(ctx);
         input = NULL;
         output = NULL;
 
