@@ -24,6 +24,7 @@ typedef struct kc_tpl kc_tpl_t;
 
 typedef struct {
     char *root;
+    int until;
 } kc_tpl_options_t;
 
 typedef void (*kc_tpl_signal_callback_t)(kc_tpl_t *ctx);

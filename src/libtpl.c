@@ -39,7 +39,8 @@ typedef struct {
 } kc_env_map_t;
 
 static const kc_env_map_t env_config_table[] = {
-    { "KC_TPL_ROOT", offsetof(kc_tpl_options_t, root), KC_ENV_TYPE_STR }
+    { "KC_TPL_ROOT", offsetof(kc_tpl_options_t, root), KC_ENV_TYPE_STR },
+    { "KC_TPL_UNTIL", offsetof(kc_tpl_options_t, until), KC_ENV_TYPE_INT },
 };
 static const int env_config_table_n = sizeof(env_config_table) / sizeof(env_config_table[0]);
 
@@ -1310,6 +1311,7 @@ const char *kc_tpl_strerror(const kc_tpl_t *ctx) {
 kc_tpl_options_t kc_tpl_options_default(void) {
     kc_tpl_options_t opts;
     memset(&opts, 0, sizeof(opts));
+    opts.until = 4;
     return opts;
 }
 

@@ -18,6 +18,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef KC_TPL_TEST_CLI
+#define KC_TPL_TEST_CLI ""
+#endif
+
 static int signal_count;
 static int signal_count_b;
 static kc_tpl_t *signal_ctx_seen;
@@ -132,9 +136,13 @@ static int render_expect(kc_tpl_t *ctx, const char *input, const char *expected)
  */
 static int case_kc_tpl_options_default(void) {
     kc_tpl_options_t opts;
+    int rc;
 
     opts = kc_tpl_options_default();
-    return expect_true("default root", opts.root == NULL);
+    rc = 0;
+    rc += expect_true("default root", opts.root == NULL);
+    rc += expect_int("default until", 4, opts.until);
+    return rc == 0 ? 0 : 1;
 }
 
 /**
@@ -148,14 +156,17 @@ static int case_kc_tpl_options_load_env(void) {
     opts = kc_tpl_options_default();
     rc = 0;
     rc += expect_int("set root env", 0, set_env_value("KC_TPL_ROOT", "env-root"));
+    rc += expect_int("set until env", 0, set_env_value("KC_TPL_UNTIL", "7"));
     kc_tpl_options_load_env(&opts);
     rc += expect_string("env root", "env-root", opts.root);
+    rc += expect_int("env until", 7, opts.until);
     rc += expect_int("replace root env", 0, set_env_value("KC_TPL_ROOT", "env-root-2"));
     kc_tpl_options_load_env(&opts);
     rc += expect_string("replaced env root", "env-root-2", opts.root);
     kc_tpl_options_load_env(NULL);
     kc_tpl_options_free(&opts);
     set_env_value("KC_TPL_ROOT", NULL);
+    set_env_value("KC_TPL_UNTIL", NULL);
     return rc == 0 ? 0 : 1;
 }
 
@@ -507,6 +518,225 @@ static int case_kc_tpl_strerror(void) {
     return rc == 0 ? 0 : 1;
 }
 
+#ifndef _WIN32
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+/**
+ * Runs the tpl CLI with optional stdin and captures stdout.
+ * @param argv Command argument vector.
+ * @param input Optional stdin text.
+ * @param output Destination output buffer.
+ * @param output_cap Output buffer capacity.
+ * @param exit_code Destination process exit code.
+ * @return 0 on success, 1 on failure.
+ */
+static int run_cli_capture(char *const argv[], const char *input, char *output,
+    size_t output_cap, int *exit_code) {
+    int in_pipe[2];
+    int out_pipe[2];
+    pid_t pid;
+    size_t used = 0;
+    int status;
+
+    if (!argv || !argv[0] || !output || output_cap == 0 || !exit_code) return 1;
+    if (pipe(in_pipe) != 0) return 1;
+    if (pipe(out_pipe) != 0) {
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        return 1;
+    }
+
+    pid = fork();
+    if (pid < 0) {
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        return 1;
+    }
+
+    if (pid == 0) {
+        dup2(in_pipe[0], STDIN_FILENO);
+        dup2(out_pipe[1], STDOUT_FILENO);
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        execv(argv[0], argv);
+        _exit(127);
+    }
+
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+    if (input && input[0] != '\0') {
+        size_t input_len = strlen(input);
+        if (write(in_pipe[1], input, input_len) != (ssize_t)input_len) {
+            close(in_pipe[1]);
+            close(out_pipe[0]);
+            waitpid(pid, NULL, 0);
+            return 1;
+        }
+    }
+    close(in_pipe[1]);
+
+    while (used + 1 < output_cap) {
+        ssize_t n = read(out_pipe[0], output + used, output_cap - used - 1);
+        if (n < 0) {
+            close(out_pipe[0]);
+            waitpid(pid, NULL, 0);
+            return 1;
+        }
+        if (n == 0) {
+            break;
+        }
+        used += (size_t)n;
+    }
+    close(out_pipe[0]);
+    output[used] = '\0';
+
+    if (waitpid(pid, &status, 0) < 0) {
+        return 1;
+    }
+    if (WIFEXITED(status)) {
+        *exit_code = WEXITSTATUS(status);
+        return 0;
+    }
+    return 1;
+}
+#endif
+
+/**
+ * Tests basic CLI behavior.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_cli_basics(void) {
+#ifdef _WIN32
+    return expect_true("cli basics are skipped on Windows", 1);
+#else
+    char output[4096];
+    char *const help_argv[] = {
+        (char *)KC_TPL_TEST_CLI,
+        (char *)"--help",
+        NULL,
+    };
+    char *const version_argv[] = {
+        (char *)KC_TPL_TEST_CLI,
+        (char *)"--version",
+        NULL,
+    };
+    char *const bad_argv[] = {
+        (char *)KC_TPL_TEST_CLI,
+        (char *)"--nope",
+        NULL,
+    };
+    char *const render_argv[] = {
+        (char *)KC_TPL_TEST_CLI,
+        (char *)"--var",
+        (char *)"title=Home",
+        NULL,
+    };
+    int exit_code;
+    int rc;
+
+    if (!KC_TPL_TEST_CLI[0]) {
+        printf("\033[33m[SKIP]\033[0m cli-basics (fixture unavailable)\n");
+        return 0;
+    }
+
+    rc = 0;
+    if (run_cli_capture(help_argv, NULL, output, sizeof(output), &exit_code) != 0) return 1;
+    rc += expect_int("cli help exits zero", 0, exit_code);
+    rc += expect_true("cli help prints usage", strstr(output, "Usage:") != NULL);
+    if (run_cli_capture(version_argv, NULL, output, sizeof(output), &exit_code) != 0) return 1;
+    rc += expect_int("cli version exits zero", 0, exit_code);
+    rc += expect_true("cli version prints build", strstr(output, "tpl build ") != NULL);
+    if (run_cli_capture(bad_argv, NULL, output, sizeof(output), &exit_code) != 0) return 1;
+    rc += expect_true("cli bad option exits non-zero", exit_code != 0);
+    if (run_cli_capture(render_argv, "<h1>{{ title }}</h1>\004",
+        output, sizeof(output), &exit_code) != 0) return 1;
+    rc += expect_int("cli renders exits zero", 0, exit_code);
+    rc += expect_true("cli renders template", strstr(output, "<h1>Home</h1>") != NULL);
+    rc += expect_true("cli writes delimiter", strstr(output, "\004") != NULL);
+    return rc == 0 ? 0 : 1;
+#endif
+}
+
+/**
+ * Tests multiple CLI requests in one resident process.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_cli_until_multi(void) {
+#ifdef _WIN32
+    return expect_true("cli multi request is skipped on Windows", 1);
+#else
+    char output[256];
+    char *const argv[] = {
+        (char *)KC_TPL_TEST_CLI,
+        (char *)"--var",
+        (char *)"title=Home",
+        (char *)"--var",
+        (char *)"name=World",
+        NULL,
+    };
+    int exit_code;
+    int rc;
+
+    if (!KC_TPL_TEST_CLI[0]) {
+        printf("\033[33m[SKIP]\033[0m cli-until-multi (fixture unavailable)\n");
+        return 0;
+    }
+
+    rc = 0;
+    if (run_cli_capture(argv, "<h1>{{ title }}</h1>\004<p>{{ name }}</p>\004",
+        output, sizeof(output), &exit_code) != 0) return 1;
+    rc += expect_int("cli multi request exits zero", 0, exit_code);
+    rc += expect_true("cli multi renders first", strstr(output, "<h1>Home</h1>") != NULL);
+    rc += expect_true("cli multi renders second", strstr(output, "<p>World</p>") != NULL);
+    rc += expect_true("cli multi writes delimiters", strstr(output, "\004") != NULL);
+    return rc == 0 ? 0 : 1;
+#endif
+}
+
+/**
+ * Tests a custom CLI delimiter and CLI-over-env precedence.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_cli_until_custom(void) {
+#ifdef _WIN32
+    return expect_true("cli custom delimiter is skipped on Windows", 1);
+#else
+    char output[128];
+    char *const argv[] = {
+        (char *)KC_TPL_TEST_CLI,
+        (char *)"--var",
+        (char *)"title=Home",
+        (char *)"--until",
+        (char *)"35",
+        NULL,
+    };
+    int exit_code;
+    int rc;
+
+    if (!KC_TPL_TEST_CLI[0]) {
+        printf("\033[33m[SKIP]\033[0m cli-until-custom (fixture unavailable)\n");
+        return 0;
+    }
+
+    rc = 0;
+    if (setenv("KC_TPL_UNTIL", "33", 1) != 0) return 1;
+    if (run_cli_capture(argv, "<h1>{{ title }}</h1>#", output, sizeof(output), &exit_code) != 0) {
+        unsetenv("KC_TPL_UNTIL");
+        return 1;
+    }
+    unsetenv("KC_TPL_UNTIL");
+    rc += expect_int("cli custom delimiter exits zero", 0, exit_code);
+    rc += expect_true("cli custom delimiter works", strstr(output, "<h1>Home</h1>") != NULL);
+    return rc == 0 ? 0 : 1;
+#endif
+}
+
 /**
  * Runs one named test case.
  * @param argc Argument count.
@@ -534,6 +764,9 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_tpl_set_var") == 0) return case_kc_tpl_set_var();
     if (strcmp(argv[1], "kc_tpl_render_string") == 0) return case_kc_tpl_render_string();
     if (strcmp(argv[1], "kc_tpl_strerror") == 0) return case_kc_tpl_strerror();
+    if (strcmp(argv[1], "cli-basics") == 0) return case_cli_basics();
+    if (strcmp(argv[1], "cli-until-multi") == 0) return case_cli_until_multi();
+    if (strcmp(argv[1], "cli-until-custom") == 0) return case_cli_until_custom();
     fprintf(stderr, "unknown case: %s\n", argv[1]);
     return 2;
 }

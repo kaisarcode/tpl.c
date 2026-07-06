@@ -18,63 +18,91 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <io.h>
+#define KC_TPL_READ  _read
+#define KC_TPL_WRITE _write
+#define KC_TPL_STDIN_FD  0
+#define KC_TPL_STDOUT_FD 1
+typedef long long kc_tpl_ssize_t;
+#else
+#include <unistd.h>
+#define KC_TPL_READ  read
+#define KC_TPL_WRITE write
+#define KC_TPL_STDIN_FD  STDIN_FILENO
+#define KC_TPL_STDOUT_FD STDOUT_FILENO
+typedef ssize_t kc_tpl_ssize_t;
+#endif
+
 /**
- * Reads all standard input into an owned string.
- * @param out_text Destination pointer for owned text.
+ * Reads from a descriptor until the delimiter byte is encountered.
+ * @param fd Source descriptor.
+ * @param until Delimiter byte value.
+ * @param out Receives the allocated buffer pointer (owned by caller).
  * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
  */
-static int kc_tpl_read_stdin(char **out_text) {
-    char *data;
-    size_t length;
-    size_t capacity;
-    char chunk[4096];
-    size_t count;
+static int kc_tpl_read_request(int fd, int until, char **out) {
+    char *buf = NULL;
+    size_t used = 0;
+    size_t cap = 0;
+    unsigned char c;
+    kc_tpl_ssize_t n;
 
-    if (out_text == NULL) {
+    if (!out) {
         return KC_TPL_ERROR;
     }
 
-    data = NULL;
-    length = 0U;
-    capacity = 0U;
-    while ((count = fread(chunk, 1, sizeof(chunk), stdin)) > 0U) {
-        if (length + count + 1U > capacity) {
-            size_t next_capacity;
-            char *next_data;
+    *out = NULL;
 
-            next_capacity = capacity > 0U ? capacity * 2U : 4096U;
-            while (next_capacity < length + count + 1U) {
-                next_capacity *= 2U;
-            }
+    for (;;) {
+        n = KC_TPL_READ(fd, &c, 1);
 
-            next_data = (char *)realloc(data, next_capacity);
-            if (next_data == NULL) {
-                free(data);
-                return KC_TPL_ERROR;
-            }
-
-            data = next_data;
-            capacity = next_capacity;
+        if (n < 0) {
+            free(buf);
+            return KC_TPL_ERROR;
         }
 
-        memcpy(data + length, chunk, count);
-        length += count;
+        if (n == 0) {
+            break;
+        }
+
+        if (c == (unsigned char)until) {
+            if (used + 1 > cap) {
+                cap = cap == 0 ? 256 : cap * 2;
+                char *p = (char *)realloc(buf, cap);
+                if (!p) {
+                    free(buf);
+                    return KC_TPL_ERROR;
+                }
+                buf = p;
+            }
+            buf[used] = '\0';
+            *out = buf;
+            return KC_TPL_OK;
+        }
+
+        if (used + 2 > cap) {
+            cap = cap == 0 ? 256 : cap * 2;
+            char *p = (char *)realloc(buf, cap);
+            if (!p) {
+                free(buf);
+                return KC_TPL_ERROR;
+            }
+            buf = p;
+        }
+
+        buf[used++] = c;
     }
 
-    if (ferror(stdin)) {
-        free(data);
-        return KC_TPL_ERROR;
-    }
-
-    if (data == NULL) {
-        data = (char *)malloc(1U);
-        if (data == NULL) {
+    if (!buf) {
+        buf = (char *)malloc(1);
+        if (!buf) {
             return KC_TPL_ERROR;
         }
     }
 
-    data[length] = '\0';
-    *out_text = data;
+    buf[used] = '\0';
+    *out = buf;
     return KC_TPL_OK;
 }
 
@@ -126,6 +154,7 @@ static void kc_print_help(const char *name) {
     printf("Options:\n");
     printf("    --root <dir>        Base directory for includes (default: cwd)\n");
     printf("    --var <key=value>   Inject a template variable (repeatable)\n");
+    printf("    --until N           Request delimiter byte (default 4)\n");
     printf("    -h, --help          Show this help\n");
     printf("    -v, --version       Show version\n");
 }
@@ -177,6 +206,8 @@ static int kc_tpl_parse_args(kc_tpl_t *ctx, int argc, char **argv) {
             if (kc_tpl_set_pair(ctx, argv[i]) != KC_TPL_OK) {
                 return KC_TPL_ERROR;
             }
+        } else if (strcmp(argv[i], "--until") == 0) {
+            i++;
         } else {
             fprintf(stderr, "tpl: unknown option '%s'\n", argv[i]);
             return KC_TPL_ERROR;
@@ -197,12 +228,40 @@ static int kc_tpl_parse_args(kc_tpl_t *ctx, int argc, char **argv) {
 int main(int argc, char **argv) {
     kc_tpl_options_t opts = kc_tpl_options_default();
     kc_tpl_t *ctx = NULL;
-    char *input;
-    char *output;
+    char *input = NULL;
+    char *output = NULL;
     int parse_rc;
-    int status;
+    int i;
 
     kc_tpl_options_load_env(&opts);
+
+    for (i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            kc_print_help(argv[0]);
+            kc_tpl_options_free(&opts);
+            return 0;
+        }
+        if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
+            kc_print_version();
+            kc_tpl_options_free(&opts);
+            return 0;
+        }
+        if (strcmp(argv[i], "--until") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "tpl: --until requires an argument\n");
+                kc_tpl_options_free(&opts);
+                return 1;
+            }
+            char *end;
+            long v = strtol(argv[++i], &end, 10);
+            if (end == argv[i] || *end != '\0' || v < 0 || v > 255) {
+                fprintf(stderr, "tpl: invalid --until value\n");
+                kc_tpl_options_free(&opts);
+                return 1;
+            }
+            opts.until = (int)v;
+        }
+    }
 
     if (kc_tpl_open(&ctx, &opts) != KC_TPL_OK) {
         fprintf(stderr, "tpl: out of memory\n");
@@ -229,27 +288,54 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    input = NULL;
-    output = NULL;
-    status = 0;
-    if (kc_tpl_read_stdin(&input) != KC_TPL_OK) {
-        fprintf(stderr, "tpl: failed to read input\n");
-        kc_tpl_close(ctx);
-        kc_tpl_options_free(&opts);
-        return 1;
+    for (;;) {
+        input = NULL;
+        output = NULL;
+
+        if (kc_tpl_read_request(KC_TPL_STDIN_FD, opts.until, &input) != KC_TPL_OK) {
+            free(input);
+            break;
+        }
+        if (!input || input[0] == '\0') {
+            free(input);
+            break;
+        }
+
+        if (kc_tpl_render_string(ctx, input, &output) != KC_TPL_OK) {
+            fprintf(stderr, "tpl: %s\n", kc_tpl_strerror(ctx));
+            free(input);
+            free(output);
+            kc_tpl_close(ctx);
+            kc_tpl_options_free(&opts);
+            return 1;
+        }
+
+        if (KC_TPL_WRITE(KC_TPL_STDOUT_FD, output, strlen(output)) < 0) {
+            fprintf(stderr, "tpl: failed to write output\n");
+            free(input);
+            free(output);
+            kc_tpl_close(ctx);
+            kc_tpl_options_free(&opts);
+            return 1;
+        }
+
+        {
+            unsigned char delim = (unsigned char)opts.until;
+            if (KC_TPL_WRITE(KC_TPL_STDOUT_FD, &delim, 1) != 1) {
+                fprintf(stderr, "tpl: failed to write delimiter\n");
+                free(input);
+                free(output);
+                kc_tpl_close(ctx);
+                kc_tpl_options_free(&opts);
+                return 1;
+            }
+        }
+
+        free(output);
+        free(input);
     }
 
-    if (kc_tpl_render_string(ctx, input, &output) != KC_TPL_OK) {
-        fprintf(stderr, "tpl: %s\n", kc_tpl_strerror(ctx));
-        status = 1;
-    } else if (fputs(output, stdout) == EOF) {
-        fprintf(stderr, "tpl: failed to write output\n");
-        status = 1;
-    }
-
-    free(output);
-    free(input);
     kc_tpl_close(ctx);
     kc_tpl_options_free(&opts);
-    return status;
+    return 0;
 }
