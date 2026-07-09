@@ -11,7 +11,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
-#include "tpl.h"
+#include "libtpl.h"
 
 #include <signal.h>
 #include <stdio.h>

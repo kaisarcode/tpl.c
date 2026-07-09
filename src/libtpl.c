@@ -14,7 +14,7 @@
 #endif
 #include <signal.h>
 
-#include "tpl.h"
+#include "libtpl.h"
 
 #include <ctype.h>
 #include <stdio.h>

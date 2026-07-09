@@ -75,7 +75,7 @@ Variables are string-based. Lists are passed as CSV or `[a,b,c]`. Truthy values 
 ## Public API
 
 ```c
-#include "tpl.h"
+#include "libtpl.h"
 
 kc_tpl_t *ctx = kc_tpl_open();
 char *output = NULL;

@@ -12,7 +12,7 @@
 #define _XOPEN_SOURCE 700
 #endif
 
-#include "tpl.h"
+#include "libtpl.h"
 
 #include <stdio.h>
 #include <stdlib.h>
