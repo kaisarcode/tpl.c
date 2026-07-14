@@ -25,7 +25,6 @@ typedef struct kc_tpl kc_tpl_t;
 typedef struct {
     char *root;
     int until;
-    char *ctrl_path;
 } kc_tpl_options_t;
 
 typedef void (*kc_tpl_signal_callback_t)(kc_tpl_t *ctx);
@@ -116,55 +115,6 @@ int kc_tpl_open(kc_tpl_t **out, const kc_tpl_options_t *opts);
  * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
  */
 int kc_tpl_close(kc_tpl_t *ctx);
-
-/**
- * Control command callback.
- * @param ctx Context handle.
- * @param fd Control connection file descriptor.
- * @param argc Number of arguments (argv[0] is the command name).
- * @param argv Argument vector.
- * @return KC_TPL_OK on success, KC_TPL_ERROR on failure.
- */
-typedef int (*kc_tpl_ctrl_callback_t)(kc_tpl_t *ctx, int fd, int argc, char **argv);
-
-/**
- * Register a control command handler.
- * @param ctx Context handle.
- * @param cmd Command name.
- * @param cb Callback function, or NULL to remove.
- * @return KC_TPL_OK on success, KC_TPL_ERROR on failure.
- */
-int kc_tpl_ctrl_on(kc_tpl_t *ctx, const char *cmd, kc_tpl_ctrl_callback_t cb);
-
-/**
- * Remove a control command handler.
- * @param ctx Context handle.
- * @param cmd Command name.
- * @return KC_TPL_OK on success, KC_TPL_ERROR on failure.
- */
-int kc_tpl_ctrl_off(kc_tpl_t *ctx, const char *cmd);
-
-/**
- * Open a Unix domain socket for control commands.
- * @param ctx Context handle.
- * @param path Socket path (copied internally).
- * @return KC_TPL_OK on success, KC_TPL_ERROR on failure.
- */
-int kc_tpl_ctrl_open(kc_tpl_t *ctx, const char *path);
-
-/**
- * Close the control socket and all active connections.
- * @param ctx Context handle.
- * @return KC_TPL_OK on success, KC_TPL_ERROR on failure.
- */
-int kc_tpl_ctrl_close(kc_tpl_t *ctx);
-
-/**
- * Non-blocking poll: accept connections, read and dispatch commands.
- * @param ctx Context handle.
- * @return Number of commands handled, or KC_TPL_ERROR on failure.
- */
-int kc_tpl_ctrl_poll(kc_tpl_t *ctx);
 
 /**
  * Sets the include root used by include directives.

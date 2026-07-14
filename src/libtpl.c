@@ -21,13 +21,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
-#ifndef _WIN32
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <poll.h>
-#include <fcntl.h>
-#endif
 
 #define KC_TPL_EVAL_CAP 2048
 #define KC_TPL_ROOT_CAP 4096
@@ -48,7 +41,6 @@ typedef struct {
 static const kc_env_map_t env_config_table[] = {
     { "KC_TPL_ROOT", offsetof(kc_tpl_options_t, root), KC_ENV_TYPE_STR },
     { "KC_TPL_UNTIL", offsetof(kc_tpl_options_t, until), KC_ENV_TYPE_INT },
-    { "KC_TPL_CTRL", offsetof(kc_tpl_options_t, ctrl_path), KC_ENV_TYPE_STR },
 };
 static const int env_config_table_n = sizeof(env_config_table) / sizeof(env_config_table[0]);
 
@@ -56,18 +48,6 @@ typedef struct {
     int sig;
     kc_tpl_signal_callback_t cb;
 } kc_tpl_signal_entry_t;
-
-typedef struct {
-    char *cmd;
-    kc_tpl_ctrl_callback_t cb;
-} kc_tpl_ctrl_entry_t;
-
-typedef struct {
-    int fd;
-    char *buf;
-    size_t used;
-    size_t cap;
-} kc_tpl_ctrl_conn_t;
 
 static kc_tpl_t **g_signal_ctx_list = NULL;
 static int g_signal_ctx_cap = 0;
@@ -103,14 +83,6 @@ struct kc_tpl {
     int n_signal_handlers;
     int signal_handlers_capacity;
     volatile sig_atomic_t stop_requested;
-    int ctrl_fd;
-    char *ctrl_path;
-    kc_tpl_ctrl_entry_t *ctrl_handlers;
-    int n_ctrl_handlers;
-    int ctrl_handlers_cap;
-    kc_tpl_ctrl_conn_t *ctrl_conns;
-    int n_ctrl_conns;
-    int ctrl_conns_cap;
 };
 
 static const char *kc_tpl_comment_open = "{{/" "*";
@@ -1211,20 +1183,11 @@ int kc_tpl_open(kc_tpl_t **out, const kc_tpl_options_t *opts) {
             return KC_TPL_ERROR;
         }
     }
-    ctx->opts.ctrl_path = opts->ctrl_path ? strdup(opts->ctrl_path) : NULL;
     if (opts->root != NULL) {
         snprintf(ctx->root, sizeof(ctx->root), "%s", opts->root);
     } else {
         snprintf(ctx->root, sizeof(ctx->root), ".");
     }
-    ctx->ctrl_fd = -1;
-    ctx->ctrl_path = NULL;
-    ctx->ctrl_handlers = NULL;
-    ctx->n_ctrl_handlers = 0;
-    ctx->ctrl_handlers_cap = 0;
-    ctx->ctrl_conns = NULL;
-    ctx->n_ctrl_conns = 0;
-    ctx->ctrl_conns_cap = 0;
     snprintf(ctx->error, sizeof(ctx->error), "ok");
     *out = ctx;
     return KC_TPL_OK;
@@ -1248,11 +1211,9 @@ int kc_tpl_close(kc_tpl_t *ctx) {
         }
     }
 
-    kc_tpl_ctrl_close(ctx);
     kc_tpl_scope_clear(&ctx->scope);
     kc_tpl_options_free(&ctx->opts);
     free(ctx->signal_handlers);
-    free(ctx->ctrl_handlers);
     free(ctx);
     return KC_TPL_OK;
 }
@@ -1400,8 +1361,6 @@ void kc_tpl_options_free(kc_tpl_options_t *opts) {
     if (!opts) return;
     free(opts->root);
     opts->root = NULL;
-    free(opts->ctrl_path);
-    opts->ctrl_path = NULL;
 }
 
 /**
@@ -1532,465 +1491,4 @@ void kc_tpl_signal_listener(int sig) {
     }
     signal(sig, SIG_DFL);
     raise(sig);
-}
-
-#ifndef _WIN32
-
-/**
- * Sends a text message to a control connection.
- * @param fd File descriptor.
- * @param msg Message string.
- * @return KC_TPL_OK on success, KC_TPL_ERROR on failure.
- */
-static int kc_tpl_ctrl_send(int fd, const char *msg) {
-    size_t len = strlen(msg);
-    return (size_t)write(fd, msg, len) == len ? KC_TPL_OK : KC_TPL_ERROR;
-}
-
-/**
- * Default handler for HELP command.
- * @param ctx Context handle.
- * @param fd Control connection fd.
- * @param argc Argument count.
- * @param argv Argument vector.
- * @return KC_TPL_OK.
- */
-static int kc_tpl_ctrl_default_help(kc_tpl_t *ctx, int fd, int argc, char **argv) {
-    int i;
-    char tmp[4096];
-    size_t pos = 0;
-    (void)argc;
-    (void)argv;
-    for (i = 0; i < ctx->n_ctrl_handlers; i++) {
-        size_t len = strlen(ctx->ctrl_handlers[i].cmd);
-        if (pos + len + 2 > sizeof(tmp)) break;
-        if (pos > 0) { tmp[pos] = ' '; pos++; }
-        memcpy(tmp + pos, ctx->ctrl_handlers[i].cmd, len);
-        pos += len;
-    }
-    if (pos + 1 > sizeof(tmp)) pos = sizeof(tmp) - 1;
-    tmp[pos] = '\n';
-    kc_tpl_ctrl_send(fd, "OK ");
-    write(fd, tmp, pos + 1);
-    return KC_TPL_OK;
-}
-
-/**
- * Default handler for STOP command.
- * @param ctx Context handle.
- * @param fd Control connection fd.
- * @param argc Argument count.
- * @param argv Argument vector.
- * @return KC_TPL_OK.
- */
-static int kc_tpl_ctrl_default_stop(kc_tpl_t *ctx, int fd, int argc, char **argv) {
-    (void)argc;
-    (void)argv;
-    if (kc_tpl_stop(ctx) == KC_TPL_OK) {
-        kc_tpl_ctrl_send(fd, "OK\n");
-    } else {
-        kc_tpl_ctrl_send(fd, "ERR\n");
-    }
-    return KC_TPL_OK;
-}
-
-/**
- * Default handler for GET command.
- * @param ctx Context handle.
- * @param fd Control connection fd.
- * @param argc Argument count.
- * @param argv Argument vector.
- * @return KC_TPL_OK.
- */
-static int kc_tpl_ctrl_default_get(kc_tpl_t *ctx, int fd, int argc, char **argv) {
-    char tmp[128];
-    if (argc < 2) return KC_TPL_ERROR;
-    if (strcmp(argv[1], "root") == 0) {
-        snprintf(tmp, sizeof(tmp), "OK %s\n", ctx->opts.root ? ctx->opts.root : "");
-    } else if (strcmp(argv[1], "until") == 0) {
-        snprintf(tmp, sizeof(tmp), "OK %d\n", ctx->opts.until);
-    } else if (strcmp(argv[1], "ctrl_path") == 0) {
-        snprintf(tmp, sizeof(tmp), "OK %s\n", ctx->opts.ctrl_path ? ctx->opts.ctrl_path : "");
-    } else {
-        return KC_TPL_ERROR;
-    }
-    write(fd, tmp, strlen(tmp));
-    return KC_TPL_OK;
-}
-
-/**
- * Default handler for SET command.
- * @param ctx Context handle.
- * @param fd Control connection fd.
- * @param argc Argument count.
- * @param argv Argument vector.
- * @return KC_TPL_OK.
- */
-static int kc_tpl_ctrl_default_set(kc_tpl_t *ctx, int fd, int argc, char **argv) {
-    if (argc < 3) {
-        kc_tpl_ctrl_send(fd, "ERR missing value\n");
-        return KC_TPL_OK;
-    }
-    if (strcmp(argv[1], "root") == 0) {
-        free(ctx->opts.root);
-        ctx->opts.root = strdup(argv[2]);
-        if (ctx->opts.root) {
-            snprintf(ctx->root, sizeof(ctx->root), "%s", ctx->opts.root);
-            kc_tpl_ctrl_send(fd, "OK\n");
-        } else {
-            kc_tpl_ctrl_send(fd, "ERR out of memory\n");
-        }
-        return KC_TPL_OK;
-    } else if (strcmp(argv[1], "until") == 0) {
-        char *end;
-        long v = strtol(argv[2], &end, 10);
-        if (end == argv[2] || *end != '\0' || v < 0 || v > 255) {
-            kc_tpl_ctrl_send(fd, "ERR invalid value\n");
-            return KC_TPL_OK;
-        }
-        ctx->opts.until = (int)v;
-        kc_tpl_ctrl_send(fd, "OK\n");
-        return KC_TPL_OK;
-    }
-    kc_tpl_ctrl_send(fd, "ERR unknown key\n");
-    return KC_TPL_OK;
-}
-
-/**
- * Parses one command line and dispatches to the registered handler.
- * @param ctx Context handle.
- * @param fd Control connection fd.
- * @param line Complete command line.
- * @return KC_TPL_OK on success, KC_TPL_ERROR on failure.
- */
-static int kc_tpl_ctrl_dispatch(kc_tpl_t *ctx, int fd, const char *line) {
-    char *copy = NULL;
-    char *argv[64];
-    int argc = 0;
-    int i;
-
-    copy = strdup(line);
-    if (!copy) return KC_TPL_ERROR;
-
-    argv[argc] = strtok(copy, " \t\r\n");
-    if (argv[argc]) {
-        argc++;
-        while (argc < 64 && (argv[argc] = strtok(NULL, " \t\r\n")) != NULL) {
-            argc++;
-        }
-    }
-
-    if (argc == 0) {
-        free(copy);
-        return KC_TPL_OK;
-    }
-
-    for (i = 0; i < ctx->n_ctrl_handlers; i++) {
-        if (strcmp(ctx->ctrl_handlers[i].cmd, argv[0]) == 0) {
-            ctx->ctrl_handlers[i].cb(ctx, fd, argc, argv);
-            free(copy);
-            return KC_TPL_OK;
-        }
-    }
-
-    kc_tpl_ctrl_send(fd, "ERR unknown command\n");
-    free(copy);
-    return KC_TPL_OK;
-}
-
-#endif
-
-/**
- * Register a control command handler.
- * @param ctx Context handle.
- * @param cmd Command name.
- * @param cb Callback or NULL to remove.
- * @return KC_TPL_OK on success, KC_TPL_ERROR on failure.
- */
-int kc_tpl_ctrl_on(kc_tpl_t *ctx, const char *cmd, kc_tpl_ctrl_callback_t cb) {
-    int i;
-
-    if (!ctx || !cmd) return KC_TPL_ERROR;
-
-    for (i = 0; i < ctx->n_ctrl_handlers; i++) {
-        if (strcmp(ctx->ctrl_handlers[i].cmd, cmd) == 0) {
-            if (cb) {
-                ctx->ctrl_handlers[i].cb = cb;
-            } else {
-                int tail = ctx->n_ctrl_handlers - i - 1;
-                if (tail > 0)
-                    memmove(&ctx->ctrl_handlers[i],
-                            &ctx->ctrl_handlers[i + 1],
-                            (size_t)tail * sizeof(kc_tpl_ctrl_entry_t));
-                ctx->n_ctrl_handlers--;
-            }
-            return KC_TPL_OK;
-        }
-    }
-    if (!cb) return KC_TPL_OK;
-    if (ctx->n_ctrl_handlers >= ctx->ctrl_handlers_cap) {
-        int new_cap = ctx->ctrl_handlers_cap ? ctx->ctrl_handlers_cap * 2 : 4;
-        kc_tpl_ctrl_entry_t *p = (kc_tpl_ctrl_entry_t *)realloc(ctx->ctrl_handlers,
-            (size_t)new_cap * sizeof(kc_tpl_ctrl_entry_t));
-        if (!p) return KC_TPL_ERROR;
-        ctx->ctrl_handlers = p;
-        ctx->ctrl_handlers_cap = new_cap;
-    }
-    ctx->ctrl_handlers[ctx->n_ctrl_handlers].cmd = strdup(cmd);
-    if (!ctx->ctrl_handlers[ctx->n_ctrl_handlers].cmd) return KC_TPL_ERROR;
-    ctx->ctrl_handlers[ctx->n_ctrl_handlers].cb = cb;
-    ctx->n_ctrl_handlers++;
-    return KC_TPL_OK;
-}
-
-/**
- * Remove a control command handler.
- * @param ctx Context handle.
- * @param cmd Command name.
- * @return KC_TPL_OK on success, KC_TPL_ERROR on failure.
- */
-int kc_tpl_ctrl_off(kc_tpl_t *ctx, const char *cmd) {
-    return kc_tpl_ctrl_on(ctx, cmd, NULL);
-}
-
-/**
- * Open a Unix domain socket for control commands.
- * @param ctx Context handle.
- * @param path Socket path.
- * @return KC_TPL_OK on success, KC_TPL_ERROR on failure.
- */
-int kc_tpl_ctrl_open(kc_tpl_t *ctx, const char *path) {
-#ifndef _WIN32
-    struct sockaddr_un addr;
-    int fd;
-    int flags;
-
-    if (!ctx || !path) return KC_TPL_ERROR;
-
-    fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) return KC_TPL_ERROR;
-
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
-    addr.sun_path[sizeof(addr.sun_path) - 1] = '\0';
-
-    unlink(path);
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        close(fd);
-        return KC_TPL_ERROR;
-    }
-
-    if (listen(fd, 4) < 0) {
-        close(fd);
-        unlink(path);
-        return KC_TPL_ERROR;
-    }
-
-    flags = fcntl(fd, F_GETFL, 0);
-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-
-    ctx->ctrl_fd = fd;
-    ctx->ctrl_path = strdup(path);
-    if (!ctx->ctrl_path) {
-        close(fd);
-        unlink(path);
-        ctx->ctrl_fd = -1;
-        return KC_TPL_ERROR;
-    }
-
-    kc_tpl_ctrl_on(ctx, "HELP", kc_tpl_ctrl_default_help);
-    kc_tpl_ctrl_on(ctx, "STOP", kc_tpl_ctrl_default_stop);
-    kc_tpl_ctrl_on(ctx, "GET", kc_tpl_ctrl_default_get);
-    kc_tpl_ctrl_on(ctx, "SET", kc_tpl_ctrl_default_set);
-
-    return KC_TPL_OK;
-#else
-    (void)ctx;
-    (void)path;
-    return KC_TPL_ERROR;
-#endif
-}
-
-/**
- * Close the control socket and all active connections.
- * @param ctx Context handle.
- * @return KC_TPL_OK on success, KC_TPL_ERROR on failure.
- */
-int kc_tpl_ctrl_close(kc_tpl_t *ctx) {
-#ifndef _WIN32
-    int i;
-
-    if (!ctx) return KC_TPL_OK;
-
-    for (i = 0; i < ctx->n_ctrl_conns; i++) {
-        if (ctx->ctrl_conns[i].fd >= 0) {
-            close(ctx->ctrl_conns[i].fd);
-        }
-        free(ctx->ctrl_conns[i].buf);
-    }
-    ctx->n_ctrl_conns = 0;
-
-    if (ctx->ctrl_fd >= 0) {
-        close(ctx->ctrl_fd);
-        ctx->ctrl_fd = -1;
-    }
-
-    if (ctx->ctrl_path) {
-        unlink(ctx->ctrl_path);
-        free(ctx->ctrl_path);
-        ctx->ctrl_path = NULL;
-    }
-
-    return KC_TPL_OK;
-#else
-    (void)ctx;
-    return KC_TPL_OK;
-#endif
-}
-
-/**
- * Non-blocking poll: accept connections, read and dispatch commands.
- * @param ctx Context handle.
- * @return Number of commands handled, or KC_TPL_ERROR on failure.
- */
-int kc_tpl_ctrl_poll(kc_tpl_t *ctx) {
-#ifndef _WIN32
-    struct pollfd pfds[64];
-    int nfds;
-    int i;
-    int handled = 0;
-
-    if (!ctx || ctx->ctrl_fd < 0) return 0;
-
-    nfds = 0;
-    pfds[nfds].fd = ctx->ctrl_fd;
-    pfds[nfds].events = POLLIN;
-    pfds[nfds].revents = 0;
-    nfds++;
-
-    for (i = 0; i < ctx->n_ctrl_conns && nfds < 64; i++) {
-        if (ctx->ctrl_conns[i].fd >= 0) {
-            pfds[nfds].fd = ctx->ctrl_conns[i].fd;
-            pfds[nfds].events = POLLIN;
-            pfds[nfds].revents = 0;
-            nfds++;
-        }
-    }
-
-    if (poll(pfds, (nfds_t)nfds, 0) < 0) return KC_TPL_ERROR;
-
-    if (pfds[0].revents & POLLIN) {
-        int conn_fd = accept(ctx->ctrl_fd, NULL, NULL);
-        if (conn_fd >= 0) {
-            int flags = fcntl(conn_fd, F_GETFL, 0);
-            fcntl(conn_fd, F_SETFL, flags | O_NONBLOCK);
-
-            if (ctx->n_ctrl_conns >= ctx->ctrl_conns_cap) {
-                int new_cap = ctx->ctrl_conns_cap ? ctx->ctrl_conns_cap * 2 : 4;
-                kc_tpl_ctrl_conn_t *p = (kc_tpl_ctrl_conn_t *)realloc(ctx->ctrl_conns,
-                    (size_t)new_cap * sizeof(kc_tpl_ctrl_conn_t));
-                if (p) {
-                    ctx->ctrl_conns = p;
-                    ctx->ctrl_conns_cap = new_cap;
-                }
-            }
-
-            if (ctx->n_ctrl_conns < ctx->ctrl_conns_cap) {
-                ctx->ctrl_conns[ctx->n_ctrl_conns].fd = conn_fd;
-                ctx->ctrl_conns[ctx->n_ctrl_conns].buf = NULL;
-                ctx->ctrl_conns[ctx->n_ctrl_conns].used = 0;
-                ctx->ctrl_conns[ctx->n_ctrl_conns].cap = 0;
-                ctx->n_ctrl_conns++;
-            } else {
-                close(conn_fd);
-            }
-        }
-    }
-
-    for (i = 0; i < ctx->n_ctrl_conns; i++) {
-        int pidx = -1;
-        int j;
-        for (j = 1; j < nfds; j++) {
-            if (pfds[j].fd == ctx->ctrl_conns[i].fd) {
-                pidx = j;
-                break;
-            }
-        }
-        if (pidx < 0 || !(pfds[pidx].revents & POLLIN)) continue;
-
-        for (;;) {
-            char chunk[256];
-            ssize_t n = read(ctx->ctrl_conns[i].fd, chunk, sizeof(chunk));
-            if (n < 0) break;
-            if (n == 0) {
-                close(ctx->ctrl_conns[i].fd);
-                ctx->ctrl_conns[i].fd = -1;
-                free(ctx->ctrl_conns[i].buf);
-                ctx->ctrl_conns[i].buf = NULL;
-                ctx->ctrl_conns[i].used = 0;
-                ctx->ctrl_conns[i].cap = 0;
-                break;
-            }
-
-            size_t offset = 0;
-            while ((size_t)n > offset) {
-                char *nl = (char *)memchr(chunk + offset, '\n', (size_t)n - offset);
-                if (!nl) {
-                    size_t avail = (size_t)n - offset;
-                    if (ctx->ctrl_conns[i].used + avail + 1 > ctx->ctrl_conns[i].cap) {
-                        size_t new_cap = ctx->ctrl_conns[i].cap ? ctx->ctrl_conns[i].cap * 2 : 256;
-                        while (new_cap < ctx->ctrl_conns[i].used + avail + 1) new_cap *= 2;
-                        char *p = (char *)realloc(ctx->ctrl_conns[i].buf, new_cap);
-                        if (!p) break;
-                        ctx->ctrl_conns[i].buf = p;
-                        ctx->ctrl_conns[i].cap = new_cap;
-                    }
-                    memcpy(ctx->ctrl_conns[i].buf + ctx->ctrl_conns[i].used, chunk + offset, avail);
-                    ctx->ctrl_conns[i].used += avail;
-                    ctx->ctrl_conns[i].buf[ctx->ctrl_conns[i].used] = '\0';
-                    offset = (size_t)n;
-                } else {
-                    size_t line_len = (size_t)(nl - (chunk + offset));
-                    size_t total = ctx->ctrl_conns[i].used + line_len;
-
-                    if (total + 1 > ctx->ctrl_conns[i].cap) {
-                        size_t new_cap = ctx->ctrl_conns[i].cap ? ctx->ctrl_conns[i].cap * 2 : 256;
-                        while (new_cap < total + 1) new_cap *= 2;
-                        char *p = (char *)realloc(ctx->ctrl_conns[i].buf, new_cap);
-                        if (!p) break;
-                        ctx->ctrl_conns[i].buf = p;
-                        ctx->ctrl_conns[i].cap = new_cap;
-                    }
-
-                    if (line_len > 0)
-                        memcpy(ctx->ctrl_conns[i].buf + ctx->ctrl_conns[i].used, chunk + offset, line_len);
-                    ctx->ctrl_conns[i].buf[total] = '\0';
-
-                    kc_tpl_ctrl_dispatch(ctx, ctx->ctrl_conns[i].fd, ctx->ctrl_conns[i].buf);
-                    handled++;
-
-                    ctx->ctrl_conns[i].used = 0;
-                    offset += line_len + 1;
-                }
-            }
-        }
-    }
-
-    {
-        int write_idx = 0;
-        for (i = 0; i < ctx->n_ctrl_conns; i++) {
-            if (ctx->ctrl_conns[i].fd >= 0) {
-                if (write_idx != i)
-                    ctx->ctrl_conns[write_idx] = ctx->ctrl_conns[i];
-                write_idx++;
-            }
-        }
-        ctx->n_ctrl_conns = write_idx;
-    }
-
-    return handled;
-#else
-    (void)ctx;
-    return 0;
-#endif
 }
