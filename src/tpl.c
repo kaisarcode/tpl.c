@@ -35,24 +35,26 @@ typedef ssize_t kc_tpl_ssize_t;
 #endif
 
 /**
- * Reads from a descriptor until the delimiter byte is encountered.
+ * Reads from a descriptor until the delimiter byte or EOF is encountered.
  * @param fd Source descriptor.
  * @param until Delimiter byte value.
  * @param out Receives the allocated buffer pointer (owned by caller).
+ * @param delimited Receives 1 for a delimiter or 0 for EOF.
  * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
  */
-static int kc_tpl_read_request(int fd, int until, char **out) {
+static int kc_tpl_read_request(int fd, int until, char **out, int *delimited) {
     char *buf = NULL;
     size_t used = 0;
     size_t cap = 0;
     unsigned char c;
     kc_tpl_ssize_t n;
 
-    if (!out) {
+    if (!out || !delimited) {
         return KC_TPL_ERROR;
     }
 
     *out = NULL;
+    *delimited = 0;
 
     for (;;) {
         n = KC_TPL_READ(fd, &c, 1);
@@ -78,6 +80,7 @@ static int kc_tpl_read_request(int fd, int until, char **out) {
             }
             buf[used] = '\0';
             *out = buf;
+            *delimited = 1;
             return KC_TPL_OK;
         }
 
@@ -230,6 +233,7 @@ int main(int argc, char **argv) {
     kc_tpl_t *ctx = NULL;
     char *input = NULL;
     char *output = NULL;
+    int delimited;
     int parse_rc;
     int i;
 
@@ -286,7 +290,8 @@ int main(int argc, char **argv) {
         input = NULL;
         output = NULL;
 
-        if (kc_tpl_read_request(KC_TPL_STDIN_FD, opts.until, &input) != KC_TPL_OK) {
+        if (kc_tpl_read_request(KC_TPL_STDIN_FD, opts.until, &input,
+            &delimited) != KC_TPL_OK) {
             free(input);
             break;
         }
@@ -313,7 +318,7 @@ int main(int argc, char **argv) {
             return 1;
         }
 
-        {
+        if (delimited) {
             unsigned char delim = (unsigned char)opts.until;
             if (KC_TPL_WRITE(KC_TPL_STDOUT_FD, &delim, 1) != 1) {
                 fprintf(stderr, "tpl: failed to write delimiter\n");
@@ -327,6 +332,8 @@ int main(int argc, char **argv) {
 
         free(output);
         free(input);
+
+        if (!delimited) break;
     }
 
     kc_tpl_close(ctx);

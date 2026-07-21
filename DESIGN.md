@@ -160,9 +160,10 @@ caller-owned output is returned unless the complete render succeeds.
 The CLI loads options from defaults and environment, applies CLI overrides,
 then keeps one context across requests.
 
-Requests arrive through stdin and end at the configured byte. Each successful
-render is written to stdout followed by the same delimiter. Empty input ends
-the loop.
+Requests arrive through stdin and end at the configured byte or EOF. A request
+ending at EOF is rendered once, written without a delimiter, and terminates
+processing. A request ending at the configured byte is written with the same
+delimiter, and resident processing continues. Empty input ends the loop.
 
 Context variables and root configuration persist across requests. Template
 directives may update root-scope variables and blocks for subsequent renders.

@@ -69,6 +69,28 @@ static int expect_true(const char *name, int condition) {
     return 0;
 }
 
+#ifndef _WIN32
+/**
+ * Verifies exact binary output.
+ * @param name Check name.
+ * @param expected Expected bytes.
+ * @param expected_size Expected byte count.
+ * @param actual Actual bytes.
+ * @param actual_size Actual byte count.
+ * @return 0 on success, 1 on failure.
+ */
+static int expect_bytes(const char *name, const char *expected,
+    size_t expected_size, const char *actual, size_t actual_size) {
+    if (expected_size != actual_size ||
+        memcmp(expected, actual, expected_size) != 0) {
+        fprintf(stderr, "%s: expected %zu bytes, got %zu bytes\n", name,
+            expected_size, actual_size);
+        return 1;
+    }
+    return 0;
+}
+#endif
+
 /**
  * Verifies a string result.
  * @param name Check name.
@@ -363,18 +385,20 @@ static int case_kc_tpl_strerror(void) {
  * @param input Optional stdin text.
  * @param output Destination output buffer.
  * @param output_cap Output buffer capacity.
+ * @param output_size Destination captured byte count.
  * @param exit_code Destination process exit code.
  * @return 0 on success, 1 on failure.
  */
 static int run_cli_capture(char *const argv[], const char *input, char *output,
-    size_t output_cap, int *exit_code) {
+    size_t output_cap, size_t *output_size, int *exit_code) {
     int in_pipe[2];
     int out_pipe[2];
     pid_t pid;
     size_t used = 0;
     int status;
 
-    if (!argv || !argv[0] || !output || output_cap == 0 || !exit_code) return 1;
+    if (!argv || !argv[0] || !output || output_cap == 0 || !output_size ||
+        !exit_code) return 1;
     if (pipe(in_pipe) != 0) return 1;
     if (pipe(out_pipe) != 0) {
         close(in_pipe[0]);
@@ -429,6 +453,7 @@ static int run_cli_capture(char *const argv[], const char *input, char *output,
     }
     close(out_pipe[0]);
     output[used] = '\0';
+    *output_size = used;
 
     if (waitpid(pid, &status, 0) < 0) {
         return 1;
@@ -471,6 +496,9 @@ static int case_cli_basics(void) {
         (char *)"title=Home",
         NULL,
     };
+    static const char eof_output[] = "<h1>Home</h1>";
+    static const char delimited_output[] = "<h1>Home</h1>\004";
+    size_t output_size;
     int exit_code;
     int rc;
 
@@ -480,19 +508,27 @@ static int case_cli_basics(void) {
     }
 
     rc = 0;
-    if (run_cli_capture(help_argv, NULL, output, sizeof(output), &exit_code) != 0) return 1;
+    if (run_cli_capture(help_argv, NULL, output, sizeof(output), &output_size,
+        &exit_code) != 0) return 1;
     rc += expect_int("cli help exits zero", 0, exit_code);
     rc += expect_true("cli help prints usage", strstr(output, "Usage:") != NULL);
-    if (run_cli_capture(version_argv, NULL, output, sizeof(output), &exit_code) != 0) return 1;
+    if (run_cli_capture(version_argv, NULL, output, sizeof(output), &output_size,
+        &exit_code) != 0) return 1;
     rc += expect_int("cli version exits zero", 0, exit_code);
     rc += expect_true("cli version prints build", strstr(output, "tpl build ") != NULL);
-    if (run_cli_capture(bad_argv, NULL, output, sizeof(output), &exit_code) != 0) return 1;
+    if (run_cli_capture(bad_argv, NULL, output, sizeof(output), &output_size,
+        &exit_code) != 0) return 1;
     rc += expect_true("cli bad option exits non-zero", exit_code != 0);
-    if (run_cli_capture(render_argv, "<h1>{{ title }}</h1>\004",
-        output, sizeof(output), &exit_code) != 0) return 1;
-    rc += expect_int("cli renders exits zero", 0, exit_code);
-    rc += expect_true("cli renders template", strstr(output, "<h1>Home</h1>") != NULL);
-    rc += expect_true("cli writes delimiter", strstr(output, "\004") != NULL);
+    if (run_cli_capture(render_argv, "<h1>{{ title }}</h1>", output,
+        sizeof(output), &output_size, &exit_code) != 0) return 1;
+    rc += expect_int("cli EOF request exits zero", 0, exit_code);
+    rc += expect_bytes("cli EOF request has raw output", eof_output,
+        sizeof(eof_output) - 1, output, output_size);
+    if (run_cli_capture(render_argv, "<h1>{{ title }}</h1>\004", output,
+        sizeof(output), &output_size, &exit_code) != 0) return 1;
+    rc += expect_int("cli delimited request exits zero", 0, exit_code);
+    rc += expect_bytes("cli delimited request preserves framing",
+        delimited_output, sizeof(delimited_output) - 1, output, output_size);
     return rc == 0 ? 0 : 1;
 #endif
 }
@@ -514,6 +550,9 @@ static int case_cli_until_multi(void) {
         (char *)"name=World",
         NULL,
     };
+    static const char expected[] =
+        "<h1>Home</h1>\004<p>World</p>\004";
+    size_t output_size;
     int exit_code;
     int rc;
 
@@ -524,11 +563,10 @@ static int case_cli_until_multi(void) {
 
     rc = 0;
     if (run_cli_capture(argv, "<h1>{{ title }}</h1>\004<p>{{ name }}</p>\004",
-        output, sizeof(output), &exit_code) != 0) return 1;
+        output, sizeof(output), &output_size, &exit_code) != 0) return 1;
     rc += expect_int("cli multi request exits zero", 0, exit_code);
-    rc += expect_true("cli multi renders first", strstr(output, "<h1>Home</h1>") != NULL);
-    rc += expect_true("cli multi renders second", strstr(output, "<p>World</p>") != NULL);
-    rc += expect_true("cli multi writes delimiters", strstr(output, "\004") != NULL);
+    rc += expect_bytes("cli multi request framing is exact", expected,
+        sizeof(expected) - 1, output, output_size);
     return rc == 0 ? 0 : 1;
 #endif
 }
@@ -550,6 +588,8 @@ static int case_cli_until_custom(void) {
         (char *)"35",
         NULL,
     };
+    static const char expected[] = "<h1>Home</h1>#";
+    size_t output_size;
     int exit_code;
     int rc;
 
@@ -560,13 +600,15 @@ static int case_cli_until_custom(void) {
 
     rc = 0;
     if (setenv("KC_TPL_UNTIL", "33", 1) != 0) return 1;
-    if (run_cli_capture(argv, "<h1>{{ title }}</h1>#", output, sizeof(output), &exit_code) != 0) {
+    if (run_cli_capture(argv, "<h1>{{ title }}</h1>#", output,
+        sizeof(output), &output_size, &exit_code) != 0) {
         unsetenv("KC_TPL_UNTIL");
         return 1;
     }
     unsetenv("KC_TPL_UNTIL");
     rc += expect_int("cli custom delimiter exits zero", 0, exit_code);
-    rc += expect_true("cli custom delimiter works", strstr(output, "<h1>Home</h1>") != NULL);
+    rc += expect_bytes("cli custom delimiter framing is exact", expected,
+        sizeof(expected) - 1, output, output_size);
     return rc == 0 ? 0 : 1;
 #endif
 }

@@ -38,6 +38,11 @@ Custom request delimiter:
 printf '<h1>{{ title }}</h1>\xff' | ./bin/x86_64/linux/tpl --var title=Home --until 255
 ```
 
+An input ending at EOF is rendered once and written without a delimiter. An
+input ending with the configured `--until` byte receives the same byte after
+its rendered output, and resident processing continues until EOF or an empty
+request.
+
 ---
 
 ### Parameters
