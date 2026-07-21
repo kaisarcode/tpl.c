@@ -37,7 +37,7 @@ context defaults its include root to `.` when no root is supplied.
 
 `kc_tpl_set_var()` copies values into the context. `kc_tpl_render_string()`
 returns a newly allocated string owned by the caller. `kc_tpl_close()` releases
-all context variables, options, callbacks, and context storage.
+all context variables, options, and context storage.
 
 ## Variable Model
 
@@ -183,14 +183,10 @@ values and unknown options.
 
 ## Signals and Concurrency
 
-Contexts own callback tables and stop flags. A small process-global list bridges
-operating-system signals to registered contexts.
+Contexts own stop flags. The library and CLI do not install, receive, or
+dispatch operating-system signals.
 
-The CLI registers interrupt and termination signals on non-Windows systems.
-This lifecycle support is not process supervision.
-
-The public API does not promise thread-safe concurrent access to one context or
-the signal registry.
+The public API does not promise thread-safe concurrent access to one context.
 
 ## Portability and Composition
 

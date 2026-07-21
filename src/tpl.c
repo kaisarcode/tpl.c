@@ -269,12 +269,6 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    kc_tpl_listen_signals(ctx);
-#ifndef _WIN32
-    kc_tpl_listen_signal(ctx, 2);
-    kc_tpl_listen_signal(ctx, 15);
-#endif
-
     parse_rc = kc_tpl_parse_args(ctx, argc, argv);
     if (parse_rc == 1) {
         kc_tpl_close(ctx);

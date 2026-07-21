@@ -261,13 +261,11 @@ Avoid:
 
 ## Signals and Concurrency
 
-Signal callbacks and stop state belong to one context. The small global signal
-list only bridges process signals to contexts.
+Stop state belongs to one context. The library does not install or dispatch
+operating-system signals.
 
-Do not expand it into process supervision or a renderer registry.
-
-The library does not promise thread-safe concurrent use. Add synchronization
-only for a concrete requirement and define the resulting contract.
+The library does not promise thread-safe concurrent use. Do not add
+synchronization without a concrete requirement and defined resulting contract.
 
 ## Testing
 

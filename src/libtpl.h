@@ -27,8 +27,6 @@ typedef struct {
     int until;
 } kc_tpl_options_t;
 
-typedef void (*kc_tpl_signal_callback_t)(kc_tpl_t *ctx);
-
 /**
  * Create an options struct initialized with default values.
  * @return Default-initialized options.
@@ -55,45 +53,6 @@ void kc_tpl_options_free(kc_tpl_options_t *opts);
  * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
  */
 int kc_tpl_stop(kc_tpl_t *ctx);
-
-/**
- * Register a handler for a library-level signal number.
- * @param ctx Context pointer.
- * @param sig Application-defined signal number.
- * @param cb Callback to invoke.
- * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
- */
-int kc_tpl_on_signal(kc_tpl_t *ctx, int sig, kc_tpl_signal_callback_t cb);
-
-/**
- * Raise a library-level signal.
- * @param ctx Context pointer.
- * @param sig Signal number to raise.
- * @return KC_TPL_OK if handled, or KC_TPL_ERROR if no handler.
- */
-int kc_tpl_raise_signal(kc_tpl_t *ctx, int sig);
-
-/**
- * Set the internal signal-listener context.
- * @param ctx Context pointer.
- * @return KC_TPL_OK on success, or KC_TPL_ERROR if ctx is NULL.
- */
-int kc_tpl_listen_signals(kc_tpl_t *ctx);
-
-/**
- * Wire an OS signal to the library signal listener.
- * @param ctx Context pointer.
- * @param sig_id OS signal number.
- * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
- */
-int kc_tpl_listen_signal(kc_tpl_t *ctx, int sig_id);
-
-/**
- * Generic signal-listener compatible with signal() / sigaction().
- * @param sig OS signal number.
- * @return None.
- */
-void kc_tpl_signal_listener(int sig);
 
 /**
  * Return the build version for the library artifact.

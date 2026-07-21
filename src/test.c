@@ -13,7 +13,6 @@
 
 #include "libtpl.h"
 
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,30 +24,6 @@
 #ifndef KC_TPL_TEST_CLI
 #define KC_TPL_TEST_CLI ""
 #endif
-
-static int signal_count;
-static int signal_count_b;
-static kc_tpl_t *signal_ctx_seen;
-
-/**
- * Counts primary signal callbacks.
- * @param ctx Context passed by the library.
- * @return None.
- */
-static void count_signal(kc_tpl_t *ctx) {
-    signal_count++;
-    signal_ctx_seen = ctx;
-}
-
-/**
- * Counts secondary signal callbacks.
- * @param ctx Context passed by the library.
- * @return None.
- */
-static void count_signal_b(kc_tpl_t *ctx) {
-    signal_count_b++;
-    signal_ctx_seen = ctx;
-}
 
 /**
  * Sets or clears one environment variable.
@@ -204,151 +179,6 @@ static int case_kc_tpl_stop(void) {
     rc += expect_int("stop context", KC_TPL_OK, kc_tpl_stop(ctx));
     rc += expect_int("stop context again", KC_TPL_OK, kc_tpl_stop(ctx));
     kc_tpl_close(ctx);
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_tpl_on_signal.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpl_on_signal(void) {
-    kc_tpl_options_t opts;
-    kc_tpl_t *ctx;
-    int rc;
-    int i;
-
-    opts = kc_tpl_options_default();
-    ctx = NULL;
-    rc = 0;
-    signal_count = 0;
-    signal_count_b = 0;
-    rc += expect_int("on signal NULL", KC_TPL_ERROR,
-        kc_tpl_on_signal(NULL, 10, count_signal));
-    rc += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
-    rc += expect_int("register handler", KC_TPL_OK,
-        kc_tpl_on_signal(ctx, 10, count_signal));
-    rc += expect_int("replace handler", KC_TPL_OK,
-        kc_tpl_on_signal(ctx, 10, count_signal_b));
-    rc += expect_int("raise replaced", KC_TPL_OK,
-        kc_tpl_raise_signal(ctx, 10));
-    rc += expect_int("old handler skipped", 0, signal_count);
-    rc += expect_int("new handler called", 1, signal_count_b);
-    rc += expect_int("remove handler", KC_TPL_OK,
-        kc_tpl_on_signal(ctx, 10, NULL));
-    rc += expect_int("remove missing handler", KC_TPL_OK,
-        kc_tpl_on_signal(ctx, 10, NULL));
-    for (i = 0; i < 8; i++) {
-        rc += expect_int("register growth handler", KC_TPL_OK,
-            kc_tpl_on_signal(ctx, 100 + i, count_signal));
-    }
-    signal_count = 0;
-    rc += expect_int("raise growth handler", KC_TPL_OK,
-        kc_tpl_raise_signal(ctx, 107));
-    rc += expect_int("growth callback count", 1, signal_count);
-    kc_tpl_close(ctx);
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_tpl_raise_signal.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpl_raise_signal(void) {
-    kc_tpl_options_t opts;
-    kc_tpl_t *ctx;
-    int rc;
-
-    opts = kc_tpl_options_default();
-    ctx = NULL;
-    rc = 0;
-    signal_count = 0;
-    signal_ctx_seen = NULL;
-    rc += expect_int("raise signal NULL", KC_TPL_ERROR,
-        kc_tpl_raise_signal(NULL, 10));
-    rc += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
-    rc += expect_int("raise unhandled", KC_TPL_ERROR,
-        kc_tpl_raise_signal(ctx, 10));
-    rc += expect_int("register handler", KC_TPL_OK,
-        kc_tpl_on_signal(ctx, 10, count_signal));
-    rc += expect_int("raise handled", KC_TPL_OK,
-        kc_tpl_raise_signal(ctx, 10));
-    rc += expect_int("callback count", 1, signal_count);
-    rc += expect_true("callback saw first", signal_ctx_seen == ctx);
-    kc_tpl_close(ctx);
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_tpl_listen_signals.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpl_listen_signals(void) {
-    kc_tpl_options_t opts;
-    kc_tpl_t *ctx;
-    int rc;
-
-    opts = kc_tpl_options_default();
-    ctx = NULL;
-    rc = 0;
-    rc += expect_int("listen signals NULL", KC_TPL_ERROR,
-        kc_tpl_listen_signals(NULL));
-    rc += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
-    rc += expect_int("listen context", KC_TPL_OK, kc_tpl_listen_signals(ctx));
-    kc_tpl_close(ctx);
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_tpl_listen_signal.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpl_listen_signal(void) {
-    kc_tpl_options_t opts;
-    kc_tpl_t *ctx;
-    int rc;
-
-    opts = kc_tpl_options_default();
-    ctx = NULL;
-    rc = 0;
-    rc += expect_int("listen signal NULL", KC_TPL_ERROR,
-        kc_tpl_listen_signal(NULL, 10));
-    rc += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
-    rc += expect_int("listen one signal", KC_TPL_OK, kc_tpl_listen_signal(ctx, 12));
-    kc_tpl_close(ctx);
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_tpl_signal_listener.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpl_signal_listener(void) {
-    kc_tpl_options_t opts;
-    kc_tpl_t *first;
-    kc_tpl_t *second;
-    int rc;
-
-    opts = kc_tpl_options_default();
-    first = NULL;
-    second = NULL;
-    rc = 0;
-    if (kc_tpl_open(&first, &opts) != KC_TPL_OK) return 1;
-    if (kc_tpl_open(&second, &opts) != KC_TPL_OK) {
-        kc_tpl_close(first);
-        return 1;
-    }
-    signal_count_b = 0;
-    signal_ctx_seen = NULL;
-    rc += expect_int("listen first", KC_TPL_OK, kc_tpl_listen_signals(first));
-    rc += expect_int("listen one signal", KC_TPL_OK, kc_tpl_listen_signal(first, 12));
-    rc += expect_int("listen second", KC_TPL_OK, kc_tpl_listen_signals(second));
-    rc += expect_int("second handler", KC_TPL_OK,
-        kc_tpl_on_signal(second, 12, count_signal_b));
-    kc_tpl_signal_listener(12);
-    rc += expect_int("listener dispatch count", 1, signal_count_b);
-    rc += expect_true("listener saw second", signal_ctx_seen == second);
-    kc_tpl_close(second);
-    kc_tpl_close(first);
     return rc == 0 ? 0 : 1;
 }
 
@@ -756,11 +586,6 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_tpl_options_load_env") == 0) return case_kc_tpl_options_load_env();
     if (strcmp(argv[1], "kc_tpl_options_free") == 0) return case_kc_tpl_options_free();
     if (strcmp(argv[1], "kc_tpl_stop") == 0) return case_kc_tpl_stop();
-    if (strcmp(argv[1], "kc_tpl_on_signal") == 0) return case_kc_tpl_on_signal();
-    if (strcmp(argv[1], "kc_tpl_raise_signal") == 0) return case_kc_tpl_raise_signal();
-    if (strcmp(argv[1], "kc_tpl_listen_signals") == 0) return case_kc_tpl_listen_signals();
-    if (strcmp(argv[1], "kc_tpl_listen_signal") == 0) return case_kc_tpl_listen_signal();
-    if (strcmp(argv[1], "kc_tpl_signal_listener") == 0) return case_kc_tpl_signal_listener();
     if (strcmp(argv[1], "kc_tpl_version") == 0) return case_kc_tpl_version();
     if (strcmp(argv[1], "kc_tpl_open") == 0) return case_kc_tpl_open();
     if (strcmp(argv[1], "kc_tpl_close") == 0) return case_kc_tpl_close();
