@@ -53,7 +53,6 @@ Preserve these properties unless explicitly instructed otherwise:
 - output uses a fixed maximum buffer and fails when exceeded;
 - rendered output is returned as a caller-owned allocation;
 - context-owned errors describe the latest failure;
-- resident CLI requests use explicit byte framing;
 - no network or persistent service is required;
 - the implementation remains portable C11 and inspectable by one person.
 
@@ -175,19 +174,6 @@ Do not split tests into files such as `test_stress.c`, `test_parser.c`, or
 platform-specific test sources. The complete project source layout must remain
 visible in these four files.
 
-## Resident Processing
-
-Resident mode is a foreground stdin/stdout filter:
-
-- requests are separated by one configured byte;
-- output is followed by the same byte;
-- variables and root remain in the context across requests;
-- empty input ends the CLI loop;
-- no daemon, broker, socket, or remote endpoint is involved.
-
-Do not reintroduce a generic control socket. A prior control plane was
-deliberately removed.
-
 ## Forbidden Default Recommendations
 
 Do not recommend or implement these without explicit instruction:
@@ -227,7 +213,7 @@ Before changing behavior, determine:
 - which fixed resource limits are affected;
 - how malformed or unterminated directives fail;
 - whether recursion remains controlled;
-- whether public ownership or resident framing changes;
+- whether public ownership or CLI behavior changes;
 - whether one person can still inspect the complete rendering path.
 
 Reject speculative syntax and extension points.
@@ -283,7 +269,7 @@ Behavioral changes should test:
 - output, include, list, name, and block boundaries;
 - context error details;
 - caller ownership of rendered output;
-- resident framing and CLI precedence.
+- CLI behavior and precedence.
 
 Do not weaken exact output assertions to accommodate a language change.
 

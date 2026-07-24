@@ -142,7 +142,6 @@ static int case_kc_tpl_options_default(void) {
     opts = kc_tpl_options_default();
     rc = 0;
     rc += expect_true("default root", opts.root == NULL);
-    rc += expect_int("default until", 4, opts.until);
     return rc == 0 ? 0 : 1;
 }
 
@@ -157,17 +156,14 @@ static int case_kc_tpl_options_load_env(void) {
     opts = kc_tpl_options_default();
     rc = 0;
     rc += expect_int("set root env", 0, set_env_value("KC_TPL_ROOT", "env-root"));
-    rc += expect_int("set until env", 0, set_env_value("KC_TPL_UNTIL", "7"));
     kc_tpl_options_load_env(&opts);
     rc += expect_string("env root", "env-root", opts.root);
-    rc += expect_int("env until", 7, opts.until);
     rc += expect_int("replace root env", 0, set_env_value("KC_TPL_ROOT", "env-root-2"));
     kc_tpl_options_load_env(&opts);
     rc += expect_string("replaced env root", "env-root-2", opts.root);
     kc_tpl_options_load_env(NULL);
     kc_tpl_options_free(&opts);
     set_env_value("KC_TPL_ROOT", NULL);
-    set_env_value("KC_TPL_UNTIL", NULL);
     return rc == 0 ? 0 : 1;
 }
 
@@ -534,86 +530,6 @@ static int case_cli_basics(void) {
 }
 
 /**
- * Tests multiple CLI requests in one resident process.
- * @return 0 on success, 1 on failure.
- */
-static int case_cli_until_multi(void) {
-#ifdef _WIN32
-    return expect_true("cli multi request is skipped on Windows", 1);
-#else
-    char output[256];
-    char *const argv[] = {
-        (char *)KC_TPL_TEST_CLI,
-        (char *)"--var",
-        (char *)"title=Home",
-        (char *)"--var",
-        (char *)"name=World",
-        NULL,
-    };
-    static const char expected[] =
-        "<h1>Home</h1>\004<p>World</p>\004";
-    size_t output_size;
-    int exit_code;
-    int rc;
-
-    if (!KC_TPL_TEST_CLI[0]) {
-        printf("\033[33m[SKIP]\033[0m cli-until-multi (fixture unavailable)\n");
-        return 0;
-    }
-
-    rc = 0;
-    if (run_cli_capture(argv, "<h1>{{ title }}</h1>\004<p>{{ name }}</p>\004",
-        output, sizeof(output), &output_size, &exit_code) != 0) return 1;
-    rc += expect_int("cli multi request exits zero", 0, exit_code);
-    rc += expect_bytes("cli multi request framing is exact", expected,
-        sizeof(expected) - 1, output, output_size);
-    return rc == 0 ? 0 : 1;
-#endif
-}
-
-/**
- * Tests a custom CLI delimiter and CLI-over-env precedence.
- * @return 0 on success, 1 on failure.
- */
-static int case_cli_until_custom(void) {
-#ifdef _WIN32
-    return expect_true("cli custom delimiter is skipped on Windows", 1);
-#else
-    char output[128];
-    char *const argv[] = {
-        (char *)KC_TPL_TEST_CLI,
-        (char *)"--var",
-        (char *)"title=Home",
-        (char *)"--until",
-        (char *)"35",
-        NULL,
-    };
-    static const char expected[] = "<h1>Home</h1>#";
-    size_t output_size;
-    int exit_code;
-    int rc;
-
-    if (!KC_TPL_TEST_CLI[0]) {
-        printf("\033[33m[SKIP]\033[0m cli-until-custom (fixture unavailable)\n");
-        return 0;
-    }
-
-    rc = 0;
-    if (setenv("KC_TPL_UNTIL", "33", 1) != 0) return 1;
-    if (run_cli_capture(argv, "<h1>{{ title }}</h1>#", output,
-        sizeof(output), &output_size, &exit_code) != 0) {
-        unsetenv("KC_TPL_UNTIL");
-        return 1;
-    }
-    unsetenv("KC_TPL_UNTIL");
-    rc += expect_int("cli custom delimiter exits zero", 0, exit_code);
-    rc += expect_bytes("cli custom delimiter framing is exact", expected,
-        sizeof(expected) - 1, output, output_size);
-    return rc == 0 ? 0 : 1;
-#endif
-}
-
-/**
  * Runs one named test case.
  * @param argc Argument count.
  * @param argv Argument vector.
@@ -636,8 +552,6 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_tpl_render_string") == 0) return case_kc_tpl_render_string();
     if (strcmp(argv[1], "kc_tpl_strerror") == 0) return case_kc_tpl_strerror();
     if (strcmp(argv[1], "cli-basics") == 0) return case_cli_basics();
-    if (strcmp(argv[1], "cli-until-multi") == 0) return case_cli_until_multi();
-    if (strcmp(argv[1], "cli-until-custom") == 0) return case_cli_until_custom();
     fprintf(stderr, "unknown case: %s\n", argv[1]);
     return 2;
 }

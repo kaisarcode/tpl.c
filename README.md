@@ -26,23 +26,6 @@ Render a file with includes:
 ./bin/x86_64/linux/tpl --root ./views --var page=Home < views/page.html
 ```
 
-Multiple requests in one resident process (delimiter `\x04`):
-
-```bash
-printf '<h1>{{ title }}</h1>\004<p>{{ name }}</p>\004' | ./bin/x86_64/linux/tpl --var title=Home --var name=World
-```
-
-Custom request delimiter:
-
-```bash
-printf '<h1>{{ title }}</h1>\xff' | ./bin/x86_64/linux/tpl --var title=Home --until 255
-```
-
-An input ending at EOF is rendered once and written without a delimiter. An
-input ending with the configured `--until` byte receives the same byte after
-its rendered output, and resident processing continues until EOF or an empty
-request.
-
 ---
 
 ### Parameters
@@ -51,7 +34,6 @@ request.
 | :--- | :--- |
 | `--root <dir>` | Base directory for `{{@include ...}}` path resolution (default: cwd) |
 | `--var <key=value>` | Inject a template variable (repeatable) |
-| `--until N` | Request delimiter byte (default 4) |
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
 

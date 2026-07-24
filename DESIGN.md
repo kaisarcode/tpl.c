@@ -21,13 +21,12 @@ The rendering path is direct:
 5. Output accumulates in the context's fixed buffer.
 6. A caller-owned copy is returned.
 
-The CLI owns argument parsing and byte-framed stdin/stdout processing. The
+The CLI owns argument parsing and stdin/stdout processing. The
 library owns all template semantics.
 
 ## Lifecycle and Ownership
 
-`kc_tpl_options_default()` returns caller-owned options with no root allocation
-and delimiter byte 4.
+`kc_tpl_options_default()` returns caller-owned options with no root allocation.
 
 `kc_tpl_options_load_env()` may allocate the root string. The caller releases
 it with `kc_tpl_options_free()`.
@@ -155,32 +154,23 @@ context error buffer returned by `kc_tpl_strerror()`.
 The renderer may have accumulated partial internal output when it fails, but no
 caller-owned output is returned unless the complete render succeeds.
 
-## Resident CLI
+## One-Shot CLI
 
 The CLI loads options from defaults and environment, applies CLI overrides,
-then keeps one context across requests.
+reads all available stdin, renders the template once, and writes the result to
+stdout.
 
-Requests arrive through stdin and end at the configured byte or EOF. A request
-ending at EOF is rendered once, written without a delimiter, and terminates
-processing. A request ending at the configured byte is written with the same
-delimiter, and resident processing continues. Empty input ends the loop.
-
-Context variables and root configuration persist across requests. Template
-directives may update root-scope variables and blocks for subsequent renders.
-
-This is a foreground filter, not a daemon or remote renderer. A generic control
-socket was deliberately removed.
+Empty input produces no output. The context is released after rendering.
 
 ## Configuration
 
 Configuration precedence is:
 
 1. Built-in defaults.
-2. `KC_TPL_ROOT` and `KC_TPL_UNTIL` environment values.
-3. `--root`, repeated `--var`, and `--until` CLI flags.
+2. `KC_TPL_ROOT` environment value.
+3. `--root` and repeated `--var` CLI flags.
 
-The CLI accepts delimiter values from 0 through 255 and rejects malformed
-values and unknown options.
+The CLI rejects unknown options.
 
 ## Signals and Concurrency
 
@@ -195,7 +185,7 @@ The implementation is portable C11 with small platform branches for descriptor
 I/O and signals. The build emits CLI, static library, and shared library
 artifacts.
 
-The CLI composes through stdin, stdout, stderr, byte framing, and exit status.
+The CLI composes through stdin, stdout, stderr, and exit status.
 The library composes through direct C calls and caller-owned strings.
 
 HTTP serving, file watching, content storage, data decoding, and application
@@ -235,7 +225,7 @@ A proposed change should answer:
 6. Which fixed limits change and why?
 7. How do malformed and nested forms fail?
 8. Does rendering remain deterministic and locally inspectable?
-9. Does resident framing remain byte-exact?
+9. Does output remain directly processable by downstream tools?
 10. Does the feature turn the renderer into a language or framework?
 
 Changes justified mainly by framework parity, enterprise readiness, or
