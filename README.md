@@ -52,10 +52,10 @@ Render a file with includes:
 | `{{@setblock name}} ... {{@endsetblock}}` | Define a named block |
 | `{{@block name}}` | Render a named block |
 | `{{@block name { key: val }}}` | Render a block with inline props |
-| `{{@if expr}} ... {{@else}} ... {{@endif}}` | Conditional rendering |
+| `{{@if expr}} ... {{@else}} ... {{@endif}}` | Conditional rendering with `!`, `==`, `!=`, `&&`, `||` |
 | `{{@foreach item in list}} ... {{@endforeach}}` | Iterate over a comma-separated list or `[a,b,c]` |
 
-Variables are string-based. Lists are passed as CSV or `[a,b,c]`. Truthy values are non-empty strings except `0`, `false`, and `null`. Directives inside HTML comments (`<!-- -->`) are not evaluated.
+Variables are string-based. Lists are passed as CSV or `[a,b,c]`. Truthy values are non-empty strings except `0`, `false`, and `null`. Conditions may use `!`, `==`, `!=`, `&&`, and `||`; operands are evaluated as strings, and a single operand follows the truthiness rule. Directives inside HTML comments (`<!-- -->`) are not evaluated.
 
 ---
 

@@ -536,24 +536,125 @@ static int kc_tpl_eval(kc_tpl_scope_t *scope, char *expr, char *out) {
 }
 
 /**
- * Evaluates truthiness of an expression.
- * @param scope Scope pointer.
- * @param expr Expression text.
+ * Checks the truthiness of an evaluated string value.
+ * @param value Evaluated value.
  * @return 1 when truthy, or 0 otherwise.
  */
-static int kc_tpl_truth(kc_tpl_scope_t *scope, char *expr) {
-    char value[KC_TPL_EVAL_CAP];
-
-    if (kc_tpl_eval(scope, expr, value) != KC_TPL_OK) {
-        return 0;
-    }
-
+static int kc_tpl_value_truthy(const char *value) {
     return (
         value[0] != '\0' &&
         strcmp(value, "0") != 0 &&
         strcmp(value, "false") != 0 &&
         strcmp(value, "null") != 0
     );
+}
+
+/**
+ * Evaluates one comparison term of a condition.
+ * @param scope Scope pointer.
+ * @param expr Term text.
+ * @return 1 when the term holds, or 0 otherwise.
+ */
+static int kc_tpl_cmp(kc_tpl_scope_t *scope, char *expr) {
+    char *op;
+    char *lv;
+    char *rv;
+    int result;
+
+    expr = kc_tpl_trim(expr);
+    if (expr[0] == '!') {
+        return kc_tpl_cmp(scope, expr + 1) ? 0 : 1;
+    }
+
+    op = strstr(expr, "==");
+    if (op == NULL) {
+        op = strstr(expr, "!=");
+    }
+    if (op != NULL) {
+        char not_equal;
+        char *left;
+        char *right;
+        int equal;
+
+        not_equal = op[0] == '!';
+        *op = '\0';
+        left = kc_tpl_trim(expr);
+        right = kc_tpl_trim(op + 2);
+        lv = kc_tpl_eval_dup(scope, left);
+        rv = kc_tpl_eval_dup(scope, right);
+        if (lv == NULL || rv == NULL) {
+            free(lv);
+            free(rv);
+            return 0;
+        }
+
+        equal = strcmp(lv, rv) == 0;
+        free(lv);
+        free(rv);
+        return not_equal ? (equal ? 0 : 1) : equal;
+    }
+
+    lv = kc_tpl_eval_dup(scope, expr);
+    if (lv == NULL) {
+        return 0;
+    }
+
+    result = kc_tpl_value_truthy(lv);
+    free(lv);
+    return result;
+}
+
+/**
+ * Evaluates truthiness of a condition expression.
+ * Supports negation (!), equality (==), inequality (!=),
+ * conjunction (&&), and disjunction (||) terms.
+ * @param scope Scope pointer.
+ * @param expr Expression text.
+ * @return 1 when truthy, or 0 otherwise.
+ */
+static int kc_tpl_truth(kc_tpl_scope_t *scope, char *expr) {
+    char buf[KC_TPL_EVAL_CAP];
+    char *or_start;
+
+    snprintf(buf, sizeof(buf), "%s", expr);
+
+    or_start = buf;
+    while (or_start != NULL) {
+        char *or_end;
+        char *cursor;
+        int and_result;
+
+        or_end = strstr(or_start, "||");
+        if (or_end != NULL) {
+            *or_end = '\0';
+        }
+
+        and_result = 1;
+        cursor = or_start;
+        while (cursor != NULL) {
+            char *and_end;
+
+            and_end = strstr(cursor, "&&");
+            if (and_end != NULL) {
+                *and_end = '\0';
+            }
+
+            if (!kc_tpl_cmp(scope, cursor)) {
+                and_result = 0;
+                break;
+            }
+
+            cursor = and_end != NULL ? and_end + 2 : NULL;
+        }
+
+        if (and_result) {
+            return 1;
+        }
+
+        or_start = or_end != NULL ? or_end + 2 : NULL;
+    }
+
+    return 0;
 }
 
 /**

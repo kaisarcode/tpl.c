@@ -70,7 +70,7 @@ The directive set is intentionally small:
 - `@var` assigns an evaluated string in the current scope;
 - `@setblock` stores a named template body;
 - `@block` renders a named body in a child scope;
-- `@if`, optional `@else`, and `@endif` select one body;
+- `@if` (with `!`, `==`, `!=`, `&&`, `||` operands), optional `@else`, and `@endif` select one body;
 - `@foreach` and `@endforeach` render a body for each string item.
 
 Matching close directives are found with explicit nesting depth. Template

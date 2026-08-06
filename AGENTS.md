@@ -69,9 +69,10 @@ The template language supports only the documented constructs:
 - named block definition and rendering;
 - inline block properties;
 - conditionals with one optional else branch;
+- conditionals may combine `!`, `==`, `!=`, `&&`, and `||` operands;
 - foreach over comma-separated or bracketed string lists.
 
-Do not add arbitrary expressions, function calls, operators, user-defined
+Do not add arbitrary expressions, function calls, user-defined
 functions, reflection, object models, bytecode, embedded Lua or JavaScript, or
 shell execution.
 

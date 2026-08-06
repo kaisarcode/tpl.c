@@ -326,10 +326,27 @@ static int case_kc_tpl_render_string(void) {
         kc_tpl_set_var(ctx, "item_1_title", "One"));
     rc += expect_int("set item two", KC_TPL_OK,
         kc_tpl_set_var(ctx, "item_2_title", "Two"));
+    rc += expect_int("set a", KC_TPL_OK, kc_tpl_set_var(ctx, "a", "one"));
+    rc += expect_int("set b", KC_TPL_OK, kc_tpl_set_var(ctx, "b", "one"));
+    rc += expect_int("set c", KC_TPL_OK, kc_tpl_set_var(ctx, "c", "yes"));
+    rc += expect_int("set n", KC_TPL_OK, kc_tpl_set_var(ctx, "n", "0"));
     rc += render_expect(ctx, "<h1>{{ title }}</h1>", "<h1>A&amp;B</h1>");
     rc += render_expect(ctx, "{{{ raw }}}", "<b>x</b>");
     rc += render_expect(ctx, "{{@if title}}yes{{@else}}no{{@endif}}", "yes");
     rc += render_expect(ctx, "{{@if missing}}yes{{@else}}no{{@endif}}", "no");
+    rc += render_expect(ctx, "{{@if a == b}}eq{{@else}}neq{{@endif}}", "eq");
+    rc += render_expect(ctx, "{{@if a != b}}neq{{@else}}eq{{@endif}}", "eq");
+    rc += render_expect(ctx, "{{@if a == c}}eq{{@else}}neq{{@endif}}", "neq");
+    rc += render_expect(ctx, "{{@if a && b}}both{{@else}}one{{@endif}}", "both");
+    rc += render_expect(ctx, "{{@if a && missing}}both{{@else}}one{{@endif}}", "one");
+    rc += render_expect(ctx, "{{@if a || missing}}or{{@else}}none{{@endif}}", "or");
+    rc += render_expect(ctx, "{{@if missing || other}}or{{@else}}none{{@endif}}", "none");
+    rc += render_expect(ctx, "{{@if !missing}}not{{@else}}is{{@endif}}", "not");
+    rc += render_expect(ctx, "{{@if ! a}}neg{{@else}}pos{{@endif}}", "pos");
+    rc += render_expect(ctx, "{{@if n}}truthy{{@else}}falsy{{@endif}}", "falsy");
+    rc += render_expect(ctx, "{{@if n == \"0\"}}zero{{@else}}nonzero{{@endif}}", "zero");
+    rc += render_expect(ctx, "{{@if a == b && c}}pre{{@else}}post{{@endif}}", "pre");
+    rc += render_expect(ctx, "{{@if a == c || b == c}}or{{@else}}none{{@endif}}", "none");
     rc += render_expect(ctx,
         "{{@foreach item in items}}<b>{{ item.title }}</b>{{@endforeach}}",
         "<b>One</b><b>Two</b>");
